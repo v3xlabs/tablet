@@ -99,6 +99,25 @@
           },
           "markdownDescription": "Language identifier to enabled, with `*` as the fallback."
         },
+        "tablet.proseLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "markdown",
+            "plaintext",
+            "text",
+            "quarto",
+            "rmarkdown",
+            "rst",
+            "asciidoc",
+            "org",
+            "latex",
+            "tex"
+          ],
+          "markdownDescription": "Language identifiers treated as prose. In a prose document a `next-edit` configuration asks with a smaller window, a small token budget, no formatter offer, and no cross file lookup, so the answer is a few words or one precise edit instead of a rewritten paragraph."
+        },
         "tablet.debounceMs": {
           "type": "number",
           "default": 150,

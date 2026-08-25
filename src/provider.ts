@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-import { type Config as Config, isLanguageEnabled } from "./config";
+import { type Config as Config, isLanguageEnabled, isProseLanguage, proseProfile } from "./config";
 import type { Diagnostic } from "./context/diagnostics";
 import { addChunk, chunksAround } from "./context/ring-buffer";
 import { complete, describeFailure } from "./endpoint";
@@ -303,7 +303,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const active = activeConfig(runtime);
 
     if (active.configuration === undefined) {
-      renderStatus(runtime.status, idleStatus(active.names, active.problems));
+      renderStatus(runtime.status, idleStatus(active.names, active.problems), runtime.isDev);
 
       return;
     }
@@ -312,7 +312,10 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       return;
     }
 
-    const config = active.configuration;
+    const isProse = isProseLanguage(settings.get<string[]>("proseLanguages") ?? [], document.languageId);
+
+    // prose gets a bounded profile: the model answers a sentence, not a paragraph
+    const config = isProse ? proseProfile(active.configuration) : active.configuration;
 
     // a jump to an edit moves the cursor, which re-asks this provider. While the document
     // has not changed, the answer has not either, so the held suggestions are re-served
@@ -353,7 +356,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const key = await resolveSecret(parseSecretSpec(config.apiKey), secretSource(runtime));
 
     if (!key.ok) {
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: key.problem });
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: key.problem }, runtime.isDev);
 
       return;
     }
@@ -361,22 +364,22 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const headers = await resolveAll(config.headers, secretSource(runtime));
 
     if (!headers.ok) {
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: headers.problem });
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: headers.problem }, runtime.isDev);
 
       return;
     }
 
-    renderStatus(runtime.status, { kind: "working", name: config.name });
+    renderStatus(runtime.status, { kind: "working", name: config.name }, runtime.isDev);
 
     const result = await suggest(
       {
         configuration: config,
         snapshot,
         chunks: runtime.ring.chunks,
-        changes: runtime.edits.edits,
+        changes: runtime.tracker.log.edits,
         diagnostics: diagnosticsFor(document.uri, position.line),
         repo: vscode.workspace.workspaceFolders?.[0]?.name ?? "",
-        previousLines: runtime.previousLines?.path === snapshot.path ? runtime.previousLines.lines : undefined,
+        previousByPath: runtime.tracker.previousByPath,
         candidatePaths: runtime.candidatePaths,
       },
       {
@@ -413,6 +416,14 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       },
     );
 
+    // the answer was computed from snapshotText: if the document moved on while the
+    // model was thinking, the edits no longer describe what is on screen
+    if (document.getText() !== snapshotText) {
+      logDebug(runtime.output, `${config.name}: document changed during the request, discarding the answer`);
+
+      return;
+    }
+
     updateRing(runtime, snapshot);
 
     if (result.kind === "failure") {
@@ -423,7 +434,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
       logError(runtime.output, `${config.name}: ${detail}`);
 
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail });
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, runtime.isDev);
 
       return;
     }
@@ -432,24 +443,24 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       const detail = `template names ${result.unknown.join(", ")}, which tablet cannot fill`;
 
       logError(runtime.output, `${config.name}: ${detail}`);
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail });
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, runtime.isDev);
 
       return;
     }
 
     if (result.kind === "none") {
-      const fallback = config.format === "next-edit" ? await formatFallback(runtime, document, position) : undefined;
+      const fallback = !isProse && config.format === "next-edit" ? await formatFallback(runtime, document, position) : undefined;
 
       if (fallback !== undefined) {
         runtime.lastServed = { path: snapshot.path, text: snapshotText, suggestions: [{ kind: "format", path: snapshot.path }] };
         logDebug(runtime.output, `${config.name}: ${result.reason}, offering the formatter for a flagged line instead`);
-        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "offered the formatter" });
+        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "offered the formatter" }, runtime.isDev);
 
         return [fallback];
       }
 
       logDebug(runtime.output, `${config.name}: no suggestion, ${result.reason}`);
-      renderStatus(runtime.status, { kind: "idle", name: config.name, detail: result.reason });
+      renderStatus(runtime.status, { kind: "idle", name: config.name, detail: result.reason }, runtime.isDev);
 
       return;
     }
@@ -467,7 +478,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     logDebug(runtime.output, `${config.name}: ${detail}`);
 
     for (const item of items) logDebug(runtime.output, `  handed to the editor: ${describeItem(item)}`);
-    renderStatus(runtime.status, { kind: "idle", name: config.name, detail });
+    renderStatus(runtime.status, { kind: "idle", name: config.name, detail }, runtime.isDev);
 
     return items;
   },

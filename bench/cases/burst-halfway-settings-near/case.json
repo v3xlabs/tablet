@@ -1,0 +1,35 @@
+{
+  "caseId": "burst-halfway-settings-near",
+  "category": "burst-halfway",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/settings.ts",
+  "cursor": {
+    "line": 2,
+    "character": 26
+  },
+  "files": {
+    "src/settings.ts": "files/settings.ts"
+  },
+  "expected": {
+    "src/settings.ts": "expected/settings.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [
+    {
+      "path": "src/settings.ts",
+      "before": "export type Settings = {\n  theme: string;\n  locale: string;\n  fontSize: number;",
+      "after": "export type Settings = {\n  readonly theme: string;\n  locale: string;\n  fontSize: number;"
+    },
+    {
+      "path": "src/settings.ts",
+      "before": "export type Settings = {\n  readonly theme: string;\n  locale: string;\n  fontSize: number;\n  tabWidth: number;",
+      "after": "export type Settings = {\n  readonly theme: string;\n  readonly locale: string;\n  fontSize: number;\n  tabWidth: number;"
+    }
+  ],
+  "diagnostics": [],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/settings.ts": "previous/settings.ts"
+  }
+}

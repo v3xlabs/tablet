@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 
 import { type Cache, emptyCache } from "./cache";
 import { type Config, isLanguageEnabled, parseConfigurations, type ParseResult, selectActive } from "./config";
-import { type EditLog, emptyEditLog } from "./context/recent-edits";
+import { type ChangeTracker, emptyTracker } from "./context/recent-edits";
 import { emptyRing, type Ring } from "./context/ring-buffer";
 import type { Suggestion } from "./suggest";
 
@@ -15,13 +15,12 @@ export type Runtime = {
   secrets: vscode.SecretStorage;
   output: vscode.OutputChannel;
   status: vscode.StatusBarItem;
+  isDev: boolean;
   ring: Ring;
-  edits: EditLog;
+  tracker: ChangeTracker;
   cache: Cache<Suggestion[]>;
-  previousLines: { path: string; lines: string[]; } | undefined;
   lastServed: { path: string; text: string; suggestions: Suggestion[]; } | undefined;
   declined: { path: string; text: string; } | undefined;
-  lastText: Map<string, string>;
   candidatePaths: string[];
   lastPickLine: number;
   inFlight: AbortController | undefined;
@@ -36,13 +35,12 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     secrets: context.secrets,
     output: vscode.window.createOutputChannel("tablet"),
     status: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100),
+    isDev: context.extensionMode === vscode.ExtensionMode.Development,
     ring: emptyRing(ringSettings["chunks"] ?? 16),
-    edits: emptyEditLog(8),
+    tracker: emptyTracker(8),
     cache: emptyCache<Suggestion[]>(32),
-    previousLines: undefined,
     lastServed: undefined,
     declined: undefined,
-    lastText: new Map(),
     candidatePaths: [],
     lastPickLine: -9999,
     inFlight: undefined,

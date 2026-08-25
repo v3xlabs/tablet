@@ -19,7 +19,7 @@
   "diagnostics": [
     {
       "line": 39,
-      "character": 6,
+      "character": 7,
       "severity": "error",
       "source": "ts",
       "message": "JSX element 'ul' has no corresponding closing tag."

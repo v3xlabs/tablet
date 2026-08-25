@@ -16,6 +16,63 @@
   },
   "candidatePaths": [],
   "recentEdits": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "line": 45,
+      "character": 2,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    },
+    {
+      "line": 45,
+      "character": 8,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    },
+    {
+      "line": 45,
+      "character": 28,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    },
+    {
+      "line": 52,
+      "character": 0,
+      "severity": "error",
+      "source": "ts",
+      "message": "Declaration or statement expected."
+    },
+    {
+      "line": 45,
+      "character": 8,
+      "severity": "error",
+      "source": "ts",
+      "message": "A parameter initializer is only allowed in a function or constructor implementation."
+    },
+    {
+      "line": 46,
+      "character": 23,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'series'."
+    },
+    {
+      "line": 47,
+      "character": 25,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'label'."
+    },
+    {
+      "line": 48,
+      "character": 6,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'found'."
+    }
+  ],
   "allowFormat": false
 }

@@ -7,7 +7,7 @@ export type StatusState
     | { kind: "working"; name: string; }
     | { kind: "problem"; name: string; detail: string; };
 
-export const renderStatus = (item: vscode.StatusBarItem, state: StatusState): void => {
+export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, isDevelopment = false): void => {
   item.command = state.kind === "unconfigured" ? "tablet.addConfiguration" : "tablet.selectConfiguration";
 
   switch (state.kind) {
@@ -43,6 +43,13 @@ export const renderStatus = (item: vscode.StatusBarItem, state: StatusState): vo
       item.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
       break;
     }
+  }
+
+  // the dev host and the installed copy render the same name, so the build the reader
+  // is looking at is only ever told apart here
+  if (isDevelopment) {
+    item.text += " (dev)";
+    item.tooltip = `development build\n${item.tooltip ?? ""}`;
   }
 
   item.show();

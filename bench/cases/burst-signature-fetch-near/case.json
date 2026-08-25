@@ -1,0 +1,50 @@
+{
+  "caseId": "burst-signature-fetch-near",
+  "category": "burst-signature",
+  "variant": "near",
+  "language": "rust",
+  "targetPath": "src/fetch.rs",
+  "cursor": {
+    "line": 15,
+    "character": 55
+  },
+  "files": {
+    "src/fetch.rs": "files/fetch.rs"
+  },
+  "expected": {
+    "src/fetch.rs": "expected/fetch.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [
+    {
+      "path": "src/fetch.rs",
+      "before": "}\n\npub fn fetch(url: &str) -> Response {\n    let mut attempt = 0;\n",
+      "after": "}\n\npub fn fetch(url: &str, retries: u32) -> Response {\n    let mut attempt = 0;\n"
+    },
+    {
+      "path": "src/fetch.rs",
+      "before": "        let response = send(url);\n\n        if response.status < 500 || attempt > RETRY_LIMIT {\n            return response;\n        }",
+      "after": "        let response = send(url);\n\n        if response.status < 500 || attempt > retries {\n            return response;\n        }"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 29,
+      "character": 26,
+      "severity": "error",
+      "source": "rustc",
+      "message": "this function takes 2 arguments but 1 argument was supplied"
+    },
+    {
+      "line": 33,
+      "character": 4,
+      "severity": "error",
+      "source": "rustc",
+      "message": "this function takes 2 arguments but 1 argument was supplied"
+    }
+  ],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/fetch.rs": "previous/fetch.rs"
+  }
+}

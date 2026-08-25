@@ -1,0 +1,50 @@
+{
+  "caseId": "burst-signature-price-far",
+  "category": "burst-signature",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/price.ts",
+  "cursor": {
+    "line": 14,
+    "character": 0
+  },
+  "files": {
+    "src/price.ts": "files/price.ts"
+  },
+  "expected": {
+    "src/price.ts": "expected/price.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [
+    {
+      "path": "src/price.ts",
+      "before": "};\n\nexport const formatPrice = (value: number): string =>\n  `€${value.toFixed(2)}`;\n",
+      "after": "};\n\nexport const formatPrice = (value: number, locale: string): string =>\n  `€${value.toFixed(2)}`;\n"
+    },
+    {
+      "path": "src/price.ts",
+      "before": "\nexport const formatPrice = (value: number, locale: string): string =>\n  `€${value.toFixed(2)}`;\n\nexport const renderRow = (item: Item, locale: string): string =>",
+      "after": "\nexport const formatPrice = (value: number, locale: string): string =>\n  value.toLocaleString(locale, { style: \"currency\", currency: \"EUR\" });\n\nexport const renderRow = (item: Item, locale: string): string =>"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 9,
+      "character": 45,
+      "severity": "error",
+      "source": "ts",
+      "message": "Expected 2 arguments, but got 1."
+    },
+    {
+      "line": 15,
+      "character": 29,
+      "severity": "error",
+      "source": "ts",
+      "message": "Expected 2 arguments, but got 1."
+    }
+  ],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/price.ts": "previous/price.ts"
+  }
+}

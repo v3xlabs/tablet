@@ -3,7 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { emptyCache } from "../src/cache";
-import { parseConfigurations } from "../src/config";
+import { isProseLanguage, parseConfigurations, PROSE_LANGUAGE_DEFAULTS, proseProfile } from "../src/config";
+import { type ChangeTracker, trackChange } from "../src/context/recent-edits";
 import { complete } from "../src/endpoint";
 import { applyEdits } from "../src/format/apply-edits";
 import { suggest, type Suggestion, type SuggestResult } from "../src/suggest";
@@ -27,6 +28,7 @@ const LIMIT = Number(flagValue("limit") ?? Infinity);
 const FILTER = flagValue("filter");
 const IS_NO_DIAGNOSTICS = hasFlag("no-diagnostics");
 const TIMEOUT_MS = Number(flagValue("timeout") ?? 90_000);
+const SAMPLES = Number(flagValue("samples") ?? 1);
 
 const overrides: Record<string, unknown> = {};
 
@@ -52,6 +54,7 @@ if (config === undefined) throw new Error(parsed.problems.join("; "));
 
 type Outcome = {
   caseId: string;
+  sample: number;
   category: string;
   variant: string;
   language: string;
@@ -62,17 +65,22 @@ type Outcome = {
   detail?: string;
 };
 
-const loadCase = (caseId: string): { spec: CaseSpec; files: Map<string, string>; expected: Map<string, string>; } => {
+const loadCase = (caseId: string): { spec: CaseSpec; files: Map<string, string>; expected: Map<string, string>; previous: Map<string, string>; } => {
   const caseFolder = path.join(casesRoot, caseId);
   const spec = JSON.parse(readFileSync(path.join(caseFolder, "case.json"), "utf8")) as CaseSpec;
   const files = new Map<string, string>();
   const expected = new Map<string, string>();
+  const previous = new Map<string, string>();
 
   for (const [filePath, relative] of Object.entries(spec.files)) files.set(filePath, readFileSync(path.join(caseFolder, relative), "utf8"));
 
   for (const [filePath, relative] of Object.entries(spec.expected)) expected.set(filePath, readFileSync(path.join(caseFolder, relative), "utf8"));
 
-  return { spec, files, expected };
+  const previousEntries = Object.entries(spec.previousFiles ?? {});
+
+  for (const [filePath, relative] of previousEntries) previous.set(filePath, readFileSync(path.join(caseFolder, relative), "utf8"));
+
+  return { spec, files, expected, previous };
 };
 
 const solid = (text: string): string => text.split("\n").filter(line => line.trim() !== "")
@@ -111,7 +119,7 @@ const divergence = (files: Map<string, string>, expected: Map<string, string>): 
  * accepts them one at a time, re-asking in between. The judge does the same: apply the
  * first suggestion, ask again on the changed text, up to three rounds.
  */
-const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files: Map<string, string>, expected: Map<string, string>): Verdict | { kind: "applied"; } => {
+const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files: Map<string, string>, expected: Map<string, string>): Verdict | { kind: "applied"; edit: Suggestion & { kind: "edit"; }; } => {
   if (result.kind === "failure") return { outcome: "error", detail: JSON.stringify(result.failure) };
 
   if (result.kind === "invalid") return { outcome: "error", detail: `template names ${result.unknown.join(", ")}` };
@@ -134,6 +142,26 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
 
   if (first.kind === "completion") return { outcome: "wrong-edit", detail: "fim completion from a next-edit run" };
 
+  // prose has no single right answer: the inserted text has to hold the expected phrase
+  // inside the budget, and a rewritten paragraph fails on the budget
+  if (spec.prose !== undefined) {
+    if (first.path !== spec.targetPath) return { outcome: "wrong-file", detail: `edit lands in ${first.path}` };
+
+    const held = files.get(first.path) ?? "";
+
+    files.set(first.path, applyEdits(held, [first]));
+
+    if (first.text.length > spec.prose.maxInsertedChars) {
+      return { outcome: "wrong-edit", detail: `inserts ${first.text.length} chars, budget is ${spec.prose.maxInsertedChars}` };
+    }
+
+    if (!first.text.includes(spec.prose.inserted)) {
+      return { outcome: "wrong-edit", detail: `inserted text lacks ${JSON.stringify(spec.prose.inserted)}` };
+    }
+
+    return { outcome: "pass" };
+  }
+
   const held = files.get(first.path);
 
   if (held === undefined) return { outcome: "wrong-file", detail: `edit names ${first.path}, which the case does not hold` };
@@ -142,7 +170,7 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
 
   files.set(first.path, applyEdits(held, [first]));
 
-  return { kind: "applied" };
+  return { kind: "applied", edit: first };
 };
 
 const askOnce = (prompt: string) => complete({
@@ -161,8 +189,16 @@ const askOnce = (prompt: string) => complete({
 
 const MAX_ROUNDS = 3;
 
-const runCase = async (caseId: string): Promise<Outcome> => {
-  const { spec, files, expected } = loadCase(caseId);
+const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
+  const { spec, files, expected, previous } = loadCase(caseId);
+
+  const effective = isProseLanguage(PROSE_LANGUAGE_DEFAULTS, spec.language) ? proseProfile(config) : config;
+
+  const tracker: ChangeTracker = {
+    lastText: new Map([...files].map(([heldPath, text]) => [heldPath, text])),
+    previousByPath: new Map([...previous].map(([heldPath, text]) => [heldPath, text.split("\n")])),
+    log: { edits: [...spec.recentEdits], limit: 8 },
+  };
 
   let requests = 0;
   let rounds = 0;
@@ -196,7 +232,7 @@ const runCase = async (caseId: string): Promise<Outcome> => {
 
     const result = await suggest(
       {
-        configuration: config,
+        configuration: effective,
         snapshot: {
           path: spec.targetPath,
           languageId: spec.language,
@@ -205,10 +241,10 @@ const runCase = async (caseId: string): Promise<Outcome> => {
           cursorCharacter: spec.cursor.character,
         },
         chunks: [],
-        changes: spec.recentEdits,
+        changes: tracker.log.edits,
         diagnostics: IS_NO_DIAGNOSTICS ? [] : spec.diagnostics,
-        repo: "eval",
-        previousLines: undefined,
+        repo: "bench",
+        previousByPath: tracker.previousByPath,
         candidatePaths: spec.candidatePaths,
       },
       dependencies,
@@ -223,6 +259,10 @@ const runCase = async (caseId: string): Promise<Outcome> => {
       break;
     }
 
+    // the accepted suggestion fires a document change live, so the next round is asked
+    // with the model's own edit in the log and the pre-acceptance text pinned
+    trackChange(tracker, judged.edit.path, judged.edit.path, files.get(judged.edit.path) ?? "");
+
     const settled = matches(files, expected);
 
     if (settled !== undefined) {
@@ -235,6 +275,7 @@ const runCase = async (caseId: string): Promise<Outcome> => {
 
   return {
     caseId,
+    sample,
     category: spec.category,
     variant: spec.variant,
     language: spec.language,
@@ -246,12 +287,15 @@ const runCase = async (caseId: string): Promise<Outcome> => {
   };
 };
 
-const queue = readdirSync(casesRoot)
+const caseIds = readdirSync(casesRoot)
   .filter(name => FILTER === undefined || name.includes(FILTER))
   .toSorted((left, right) => left.localeCompare(right))
   .slice(0, LIMIT);
 
-console.log(`${queue.length} case(s) against ${ENDPOINT} (${MODEL}), concurrency ${CONCURRENCY}${IS_NO_DIAGNOSTICS ? ", diagnostics stripped" : ""}`);
+const queue = caseIds.flatMap(caseId =>
+  Array.from({ length: SAMPLES }, (_, sample) => ({ caseId, sample })));
+
+console.log(`${caseIds.length} case(s) against ${ENDPOINT} (${MODEL}), concurrency ${CONCURRENCY}${IS_NO_DIAGNOSTICS ? ", diagnostics stripped" : ""}${SAMPLES > 1 ? `, ${SAMPLES} samples each` : ""}`);
 
 const outcomes: Outcome[] = [];
 
@@ -259,7 +303,7 @@ const isPass = (outcome: Outcome): boolean => ["pass", "pass-loose", "format-pas
 
 const worker = async (): Promise<void> => {
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
-    const outcome = await runCase(next);
+    const outcome = await runCase(next.caseId, next.sample);
 
     outcomes.push(outcome);
     process.stdout.write(isPass(outcome) ? "." : "x");
@@ -295,6 +339,26 @@ const strict = outcomes.filter(outcome => outcome.outcome === "pass" || outcome.
 const meanMs = Math.round(outcomes.reduce((sum, held) => sum + held.ms, 0) / Math.max(1, outcomes.length));
 
 console.log(`\noverall: ${passed}/${outcomes.length} (${Math.round((passed / Math.max(1, outcomes.length)) * 100)}%), strict ${strict}/${outcomes.length}, mean ${meanMs}ms/case`);
+
+if (SAMPLES > 1) {
+  const byCase = new Map<string, Outcome[]>();
+
+  for (const outcome of outcomes) {
+    const group = byCase.get(outcome.caseId) ?? [];
+
+    group.push(outcome);
+    byCase.set(outcome.caseId, group);
+  }
+
+  let anyPassed = 0;
+
+  for (const group of byCase.values()) {
+    if (group.some(isPass)) anyPassed++;
+  }
+
+  console.log(`any-sample: ${anyPassed}/${byCase.size} case(s) passed with at least one sample`);
+}
+
 tally("category", outcome => outcome.category);
 tally("variant", outcome => outcome.variant);
 tally("outcome", outcome => outcome.outcome);

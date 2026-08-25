@@ -16,6 +16,21 @@
   },
   "candidatePaths": [],
   "recentEdits": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "line": 17,
+      "character": 28,
+      "severity": "error",
+      "source": "ts",
+      "message": "Expression expected."
+    },
+    {
+      "line": 19,
+      "character": 2,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    }
+  ],
   "allowFormat": false
 }

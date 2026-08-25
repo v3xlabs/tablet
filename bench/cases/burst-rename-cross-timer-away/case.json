@@ -1,0 +1,48 @@
+{
+  "caseId": "burst-rename-cross-timer-away",
+  "category": "burst-rename-cross",
+  "variant": "away",
+  "language": "rust",
+  "targetPath": "src/timer.rs",
+  "cursor": {
+    "line": 3,
+    "character": 24
+  },
+  "files": {
+    "src/timer.rs": "files/timer.rs",
+    "src/units.rs": "files/units.rs"
+  },
+  "expected": {
+    "src/timer.rs": "expected/timer.rs"
+  },
+  "candidatePaths": [
+    "src/units.rs"
+  ],
+  "recentEdits": [
+    {
+      "path": "src/units.rs",
+      "before": "pub const MILLIS_PER_SEC: u64 = 1_000;\n\npub fn to_ms(seconds: u64) -> u64 {\n    seconds * MILLIS_PER_SEC\n}",
+      "after": "pub const MILLIS_PER_SEC: u64 = 1_000;\n\npub fn to_millis(seconds: u64) -> u64 {\n    seconds * MILLIS_PER_SEC\n}"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 0,
+      "character": 4,
+      "severity": "error",
+      "source": "rustc",
+      "message": "unresolved import `crate::units::to_ms`: no `to_ms` in `units`"
+    },
+    {
+      "line": 8,
+      "character": 28,
+      "severity": "error",
+      "source": "rustc",
+      "message": "cannot find function `to_ms` in this scope"
+    }
+  ],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/units.rs": "previous/units.rs"
+  }
+}

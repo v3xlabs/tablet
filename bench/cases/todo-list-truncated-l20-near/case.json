@@ -16,6 +16,133 @@
   },
   "candidatePaths": [],
   "recentEdits": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "line": 20,
+      "character": 4,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    },
+    {
+      "line": 20,
+      "character": 10,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    },
+    {
+      "line": 20,
+      "character": 91,
+      "severity": "error",
+      "source": "ts",
+      "message": "',' expected."
+    },
+    {
+      "line": 53,
+      "character": 0,
+      "severity": "error",
+      "source": "ts",
+      "message": "Declaration or statement expected."
+    },
+    {
+      "line": 15,
+      "character": 9,
+      "severity": "warning",
+      "source": "ts",
+      "message": "'draft' is declared but its value is never read."
+    },
+    {
+      "line": 15,
+      "character": 16,
+      "severity": "warning",
+      "source": "ts",
+      "message": "'setDraft' is declared but its value is never read."
+    },
+    {
+      "line": 17,
+      "character": 8,
+      "severity": "warning",
+      "source": "ts",
+      "message": "'openCount' is declared but its value is never read."
+    },
+    {
+      "line": 19,
+      "character": 22,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'nu'."
+    },
+    {
+      "line": 20,
+      "character": 10,
+      "severity": "error",
+      "source": "ts",
+      "message": "A parameter initializer is only allowed in a function or constructor implementation."
+    },
+    {
+      "line": 21,
+      "character": 13,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'next'."
+    },
+    {
+      "line": 22,
+      "character": 18,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'next'."
+    },
+    {
+      "line": 25,
+      "character": 8,
+      "severity": "warning",
+      "source": "ts",
+      "message": "'add' is declared but its value is never read."
+    },
+    {
+      "line": 26,
+      "character": 8,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'draft'."
+    },
+    {
+      "line": 27,
+      "character": 21,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'items'."
+    },
+    {
+      "line": 27,
+      "character": 53,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'draft'."
+    },
+    {
+      "line": 28,
+      "character": 4,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'setItems'."
+    },
+    {
+      "line": 29,
+      "character": 4,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'setDraft'."
+    },
+    {
+      "line": 30,
+      "character": 4,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'onCountChange'."
+    }
+  ],
   "allowFormat": false
 }

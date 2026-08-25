@@ -52,7 +52,7 @@ const input = (overrides: Partial<Parameters<typeof suggest>[0]>) => ({
   changes: [],
   diagnostics: [],
   repo: "tablet",
-  previousLines: undefined,
+  previousByPath: new Map<string, string[]>(),
   candidatePaths: [],
   ...overrides,
 });
@@ -211,6 +211,30 @@ describe("suggest, next edit", () => {
     );
 
     expect(prompts).toHaveLength(1);
+  });
+
+  it("shows a recently edited candidate its pre-burst text as the original window", async () => {
+    const unchanged = { ok: true as const, texts: ["type User = {\n  displayName: string;\n};"] };
+    const elsewhere = { ok: true as const, texts: ["export const greet = (u: User) => u.displayName;"] };
+
+    const { prompts, deps: d } = dependencies([unchanged, elsewhere], {
+      "src/greet.ts": ["export const greet = (u: User) => u.name;"],
+    });
+
+    await suggest(
+      input({
+        configuration: nextEdit,
+        snapshot: editable,
+        candidatePaths: ["src/greet.ts"],
+        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+        previousByPath: new Map([["src/greet.ts", ["export const greet = (u: User) => u.OLD;"]]]),
+      }),
+      d,
+    );
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("original/src/greet.ts");
+    expect(prompts[1]).toContain("export const greet = (u: User) => u.OLD;");
   });
 });
 

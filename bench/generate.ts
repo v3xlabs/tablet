@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import type { Diagnostic } from "../src/context/diagnostics";
 import type { RecentEdit } from "../src/context/recent-edits";
+import { burstCases } from "./bursts";
+import { diagnoseTypescript } from "./diagnose";
 import { applyFault, autoFaults, endOf, type Fault, lineMatching, type Mutation } from "./faults";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +24,8 @@ export type CaseSpec = {
   recentEdits: RecentEdit[];
   diagnostics: Diagnostic[];
   allowFormat: boolean;
+  previousFiles?: Record<string, string>;
+  prose?: { inserted: string; maxInsertedChars: number; };
 };
 
 type Seed = {
@@ -217,7 +221,11 @@ const variantsFor = (mutation: Mutation, lineCount: number): Array<{ variant: "n
 
 const written: CaseSpec[] = [];
 
-const writeCase = (spec: Omit<CaseSpec, "files" | "expected"> & { files: Record<string, string[]>; expected: Record<string, string[]>; }): void => {
+const writeCase = (spec: Omit<CaseSpec, "files" | "expected" | "previousFiles"> & {
+  files: Record<string, string[]>;
+  expected: Record<string, string[]>;
+  previousFiles?: Record<string, string[]>;
+}): void => {
   const caseFolder = path.join(casesRoot, spec.caseId);
 
   mkdirSync(path.join(caseFolder, "files"), { recursive: true });
@@ -242,7 +250,27 @@ const writeCase = (spec: Omit<CaseSpec, "files" | "expected"> & { files: Record<
     expected[filePath] = relative;
   }
 
-  const held: CaseSpec = { ...spec, files, expected };
+  const previousEntries = Object.entries(spec.previousFiles ?? {});
+  const previousFiles: Record<string, string> = {};
+
+  if (previousEntries.length > 0) {
+    mkdirSync(path.join(caseFolder, "previous"), { recursive: true });
+
+    for (const [filePath, lines] of previousEntries) {
+      const relative = path.join("previous", path.basename(filePath));
+
+      writeFileSync(path.join(caseFolder, relative), `${lines.join("\n")}\n`);
+      previousFiles[filePath] = relative;
+    }
+  }
+
+  const specMeta: Omit<CaseSpec, "files" | "expected" | "previousFiles"> = spec;
+  const held: CaseSpec = {
+    ...specMeta,
+    files,
+    expected,
+    ...(previousEntries.length > 0 && { previousFiles }),
+  };
 
   writeFileSync(path.join(caseFolder, "case.json"), `${JSON.stringify(held, undefined, 2)}\n`);
   written.push(held);
@@ -261,6 +289,17 @@ for (const seed of seeds) {
   for (const fault of faults) {
     const mutation = applyFault(lines, fault, seed.language);
 
+    // whitespace faults are the linter's domain and keep their eslint-shaped entries;
+    // everything else in ts and tsx carries what the compiler actually says, which for a
+    // dropped semicolon is nothing at all
+    const isCompilerChecked = seed.language.startsWith("typescript")
+      && mutation.category !== "indent"
+      && mutation.category !== "trailing";
+
+    const diagnostics = isCompilerChecked
+      ? diagnoseTypescript(seed.file, mutation.lines.join("\n"))
+      : mutation.diagnostics;
+
     for (const { variant, cursor } of variantsFor(mutation, mutation.lines.length)) {
       writeCase({
         caseId: `${seed.file.replace(/\.\w+$/, "")}-${mutation.category}-l${mutation.faultLine + 1}-${variant}`,
@@ -273,7 +312,7 @@ for (const seed of seeds) {
         expected: { [seed.targetPath]: lines },
         candidatePaths: [],
         recentEdits: [],
-        diagnostics: mutation.diagnostics,
+        diagnostics,
         allowFormat: mutation.allowFormat,
       });
     }
@@ -377,6 +416,55 @@ for (const [variant, cursor] of [
     allowFormat: false,
   });
 }
+
+for (const authored of burstCases) writeCase(authored);
+
+const notesStale = [
+  "# Release checklist",
+  "",
+  "The build pipeline runs on every push to the main branch. Once the",
+  "artifacts are published, the release notes must be updated before",
+  "",
+  "## Packaging",
+  "",
+  "| step | command | owner |",
+  "| --- | --- | --- |",
+  "| build | pnpm build | ci |",
+  "| sign | ./scripts/sign.sh | ops |",
+  "| publish | pnpm publsh | ops |",
+];
+
+writeCase({
+  caseId: "prose-sentence-near",
+  category: "prose",
+  variant: "near",
+  language: "markdown",
+  targetPath: "docs/notes.md",
+  cursor: endOf(notesStale, 3),
+  files: { "docs/notes.md": notesStale },
+  expected: {},
+  candidatePaths: [],
+  recentEdits: [],
+  diagnostics: [],
+  allowFormat: false,
+  prose: { inserted: "release", maxInsertedChars: 40 },
+});
+
+writeCase({
+  caseId: "prose-table-near",
+  category: "prose",
+  variant: "near",
+  language: "markdown",
+  targetPath: "docs/notes.md",
+  cursor: endOf(notesStale, notesStale.length - 1),
+  files: { "docs/notes.md": notesStale },
+  expected: {},
+  candidatePaths: [],
+  recentEdits: [],
+  diagnostics: [],
+  allowFormat: false,
+  prose: { inserted: "publish", maxInsertedChars: 14 },
+});
 
 const byCategory = new Map<string, number>();
 

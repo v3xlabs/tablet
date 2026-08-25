@@ -28,7 +28,7 @@ export type SuggestInput = {
   changes: RecentEdit[];
   diagnostics: Diagnostic[];
   repo: string;
-  previousLines: string[] | undefined;
+  previousByPath: ReadonlyMap<string, string[]>;
   candidatePaths: string[];
 };
 
@@ -88,7 +88,7 @@ const localTarget = (input: SuggestInput, windowLines: number): EditTarget => {
     windowStart: span.start,
     windowEnd: span.end,
     cursor: { line: snapshot.cursorLine, character: snapshot.cursorCharacter },
-    previousWindow: input.previousLines?.slice(span.start, span.end),
+    previousWindow: input.previousByPath.get(snapshot.path)?.slice(span.start, span.end),
   };
 };
 
@@ -297,7 +297,7 @@ const diagnosticTarget = (input: SuggestInput, windowLines: number): EditTarget 
     windowStart: span.start,
     windowEnd: span.end,
     cursor: undefined,
-    previousWindow: input.previousLines?.slice(span.start, span.end),
+    previousWindow: input.previousByPath.get(snapshot.path)?.slice(span.start, span.end),
   };
 };
 
@@ -374,7 +374,7 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
       windowStart: span.start,
       windowEnd: span.end,
       cursor: undefined,
-      previousWindow: undefined,
+      previousWindow: input.previousByPath.get(path)?.slice(span.start, span.end),
     });
 
     if (elsewhere.kind !== "none") return elsewhere;

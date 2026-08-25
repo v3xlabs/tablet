@@ -20,6 +20,20 @@ cursor at the cut), `stale-rename` (a rename left half applied, with the rename 
 `recentEdits`), `stale-rename-cross` (the stale use sits in a file the cursor is not in),
 and `clean` (nothing wrong; the only right answer is no suggestion).
 
+`prose` cases carry no `expected/` text, because a sentence has no single right
+completion. They carry `prose.contains` and `prose.maxInsertedChars` in `case.json`
+instead: the run passes when the applied text holds the phrase and the inserted text
+stays within the budget, so a rewritten paragraph fails. These run with the same prose
+profile the extension applies (`proseProfile` in `src/config.ts`).
+
+`bursts.ts` adds authored multi-step edit bursts, replayed snapshot by snapshot through
+`blocksFromChange()` and `recordEdit()` so the case's `recentEdits` match what the
+extension logs live: `burst-rename` and `burst-rename-cross` (an identifier renamed in
+several keystroke steps, call sites still stale), `burst-signature` (a function gained a
+parameter, call sites still on the old arity), and `burst-halfway` (a systematic edit
+applied to half its sites). These cases carry `previousFiles/`, the pre-burst text that
+the extension hands over as the prompt's `original/` window.
+
 Cases that a real editor would annotate carry the matching diagnostics in `case.json`.
 
 Each fault appears in up to three cursor placements: `near` (on the faulty line), `far`
@@ -35,6 +49,7 @@ pnpm bench -- --limit 20 --concurrency 4
 pnpm bench -- --filter series-indent
 pnpm bench -- --no-diagnostics # measure what the diagnostics contribute
 pnpm bench -- --no-format-marker # drop the formatter instruction from the prompt
+pnpm bench -- --samples 3 --temperature 0.2 # run every case three times, report per-sample and any-sample
 pnpm bench -- --windowLines 31 --contextLines 100 --endpoint http://127.0.0.1:8080/v1 --model m
 ```
 

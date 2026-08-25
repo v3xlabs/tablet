@@ -1,0 +1,35 @@
+{
+  "caseId": "burst-halfway-totals-near",
+  "category": "burst-halfway",
+  "variant": "near",
+  "language": "rust",
+  "targetPath": "src/stats.rs",
+  "cursor": {
+    "line": 2,
+    "character": 20
+  },
+  "files": {
+    "src/stats.rs": "files/stats.rs"
+  },
+  "expected": {
+    "src/stats.rs": "expected/stats.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [
+    {
+      "path": "src/stats.rs",
+      "before": "pub struct Totals {\n    pub views: i32,\n    pub clicks: i32,\n    pub likes: i32,",
+      "after": "pub struct Totals {\n    pub views: i64,\n    pub clicks: i32,\n    pub likes: i32,"
+    },
+    {
+      "path": "src/stats.rs",
+      "before": "pub struct Totals {\n    pub views: i64,\n    pub clicks: i32,\n    pub likes: i32,\n    pub shares: i32,",
+      "after": "pub struct Totals {\n    pub views: i64,\n    pub clicks: i64,\n    pub likes: i32,\n    pub shares: i32,"
+    }
+  ],
+  "diagnostics": [],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/stats.rs": "previous/stats.rs"
+  }
+}

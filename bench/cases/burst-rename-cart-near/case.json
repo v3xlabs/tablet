@@ -1,0 +1,50 @@
+{
+  "caseId": "burst-rename-cart-near",
+  "category": "burst-rename",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/cart.ts",
+  "cursor": {
+    "line": 22,
+    "character": 38
+  },
+  "files": {
+    "src/cart.ts": "files/cart.ts"
+  },
+  "expected": {
+    "src/cart.ts": "expected/cart.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [
+    {
+      "path": "src/cart.ts",
+      "before": "};\n\nexport const total = (items: Item[]): number => {\n  let sum = 0;\n",
+      "after": "};\n\nexport const grandTotal = (items: Item[]): number => {\n  let sum = 0;\n"
+    },
+    {
+      "path": "src/cart.ts",
+      "before": "\nexport const discounted = (cart: Cart): number => {\n  const base = total(cart.items);\n\n  return base - base * cart.discount;",
+      "after": "\nexport const discounted = (cart: Cart): number => {\n  const base = grandTotal(cart.items);\n\n  return base - base * cart.discount;"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 28,
+      "character": 9,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'total'. Did you mean 'grandTotal'?"
+    },
+    {
+      "line": 44,
+      "character": 33,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'total'. Did you mean 'grandTotal'?"
+    }
+  ],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/cart.ts": "previous/cart.ts"
+  }
+}

@@ -18,8 +18,15 @@
   "recentEdits": [],
   "diagnostics": [
     {
-      "line": 56,
+      "line": 55,
       "character": 6,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'span'."
+    },
+    {
+      "line": 56,
+      "character": 33,
       "severity": "error",
       "source": "ts",
       "message": "Cannot find name 'span'."

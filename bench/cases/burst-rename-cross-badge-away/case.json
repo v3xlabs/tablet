@@ -1,0 +1,41 @@
+{
+  "caseId": "burst-rename-cross-badge-away",
+  "category": "burst-rename-cross",
+  "variant": "away",
+  "language": "typescript",
+  "targetPath": "src/badge.ts",
+  "cursor": {
+    "line": 4,
+    "character": 13
+  },
+  "files": {
+    "src/badge.ts": "files/badge.ts",
+    "src/theme.ts": "files/theme.ts"
+  },
+  "expected": {
+    "src/badge.ts": "expected/badge.ts"
+  },
+  "candidatePaths": [
+    "src/theme.ts"
+  ],
+  "recentEdits": [
+    {
+      "path": "src/theme.ts",
+      "before": "};\n\nexport const colorFor = (tone: Tone): string => COLORS[tone];\n\nexport const contrastText = (hex: string): string => {",
+      "after": "};\n\nexport const toneColor = (tone: Tone): string => COLORS[tone];\n\nexport const contrastText = (hex: string): string => {"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 0,
+      "character": 9,
+      "severity": "error",
+      "source": "ts",
+      "message": "Module '\"./theme\"' has no exported member 'colorFor'."
+    }
+  ],
+  "allowFormat": false,
+  "previousFiles": {
+    "src/theme.ts": "previous/theme.ts"
+  }
+}

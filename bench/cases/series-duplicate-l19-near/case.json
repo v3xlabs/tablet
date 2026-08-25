@@ -18,6 +18,13 @@
   "recentEdits": [],
   "diagnostics": [
     {
+      "line": 17,
+      "character": 8,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot redeclare block-scoped variable 'samples'."
+    },
+    {
       "line": 18,
       "character": 8,
       "severity": "error",

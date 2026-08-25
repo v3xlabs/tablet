@@ -2,48 +2,32 @@ import * as vscode from "vscode";
 
 import { emptyCache } from "./cache";
 import { registerCommands } from "./commands";
-import { blocksFromChange, recordEdit } from "./context/recent-edits";
+import { trackChange } from "./context/recent-edits";
 import { createProvider } from "./provider";
 import { activeConfig, cancelIdleTrigger, createRuntime, noteFile, relativePath, type Runtime, scheduleIdleTrigger } from "./runtime";
 import { idleStatus, renderStatus } from "./status-bar";
 import type { Suggestion } from "./suggest";
 
-const CHANGE_PADDING = 2;
-
 const trackDocument = (runtime: Runtime, document: vscode.TextDocument): void => {
   if (document.uri.scheme !== "file") return;
 
-  const key = document.uri.toString();
-  const now = document.getText();
-  const previous = runtime.lastText.get(key);
-
-  runtime.lastText.set(key, now);
-
-  if (previous === undefined) return;
-
-  const before = previous.split(/\r?\n/);
-  const after = now.split(/\r?\n/);
   const path = relativePath(document.uri);
-  const blocks = blocksFromChange(before, after, CHANGE_PADDING);
 
-  if (blocks === undefined) return;
-
-  runtime.previousLines = { path, lines: before };
-  runtime.edits = recordEdit(runtime.edits, { path, before: blocks.before, after: blocks.after });
-
-  noteFile(runtime, path);
+  if (trackChange(runtime.tracker, document.uri.toString(), path, document.getText())) {
+    noteFile(runtime, path);
+  }
 };
 
 const showActive = (runtime: Runtime): void => {
   const active = activeConfig(runtime);
 
   if (active.configuration === undefined) {
-    renderStatus(runtime.status, idleStatus(active.names, active.problems));
+    renderStatus(runtime.status, idleStatus(active.names, active.problems), runtime.isDev);
 
     return;
   }
 
-  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name, detail: "" });
+  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name, detail: "" }, runtime.isDev);
 };
 
 export const activate = (context: vscode.ExtensionContext): void => {

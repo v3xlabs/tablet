@@ -1,0 +1,23 @@
+{
+  "caseId": "prose-sentence-near",
+  "category": "prose",
+  "variant": "near",
+  "language": "markdown",
+  "targetPath": "docs/notes.md",
+  "cursor": {
+    "line": 3,
+    "character": 65
+  },
+  "files": {
+    "docs/notes.md": "files/notes.md"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false,
+  "prose": {
+    "inserted": "release",
+    "maxInsertedChars": 40
+  }
+}

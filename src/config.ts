@@ -222,3 +222,40 @@ export const selectActive = (
 
 export const isLanguageEnabled = (languages: Record<string, boolean>, languageId: string): boolean =>
   languages[languageId] ?? languages["*"] ?? true;
+
+export const PROSE_LANGUAGE_DEFAULTS = [
+  "markdown",
+  "plaintext",
+  "text",
+  "quarto",
+  "rmarkdown",
+  "rst",
+  "asciidoc",
+  "org",
+  "latex",
+  "tex",
+];
+
+export const isProseLanguage = (languages: string[], languageId: string): boolean => languages.includes(languageId);
+
+const PROSE_WINDOW_LINES = 9;
+const PROSE_CONTEXT_LINES = 60;
+const PROSE_MAX_TOKENS = 160;
+
+/**
+ * Prose answers should read as a sentence ending or one precise correction, not a
+ * rewritten paragraph: a small window, a small token budget, no formatter offer, and no
+ * cross file wandering. Code settings are left untouched.
+ */
+export const proseProfile = (config: Config): Config =>
+  (config.format === "next-edit"
+    ? {
+        ...config,
+        windowLines: Math.min(config.windowLines, PROSE_WINDOW_LINES),
+        contextLines: Math.min(config.contextLines, PROSE_CONTEXT_LINES),
+        maxTokens: Math.min(config.maxTokens, PROSE_MAX_TOKENS),
+        formatMarker: "",
+        crossFileCandidates: 0,
+        contextFiles: 0,
+      }
+    : config);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isLanguageEnabled, parseConfigurations, selectActive } from "../src/config";
+import { isLanguageEnabled, isProseLanguage, parseConfigurations, proseProfile, selectActive } from "../src/config";
 
 const local = {
   endpoint: "http://127.0.0.1:8080/v1",
@@ -87,5 +87,51 @@ describe("isLanguageEnabled", () => {
 
   it("uses the fallback for a language nobody listed", () => {
     expect(isLanguageEnabled({ "*": false }, "rust")).toBe(false);
+  });
+});
+
+describe("proseProfile", () => {
+  const nextEdit = parseConfigurations({
+    local: { endpoint: "http://x/v1", model: "m", format: "next-edit" },
+  }).configurations[0];
+
+  it("bounds the window, the context, and the budget", () => {
+    if (nextEdit === undefined) throw new Error("config missing");
+
+    const prose = proseProfile(nextEdit);
+
+    expect(prose.format === "next-edit" && prose.windowLines).toBe(9);
+    expect(prose.format === "next-edit" && prose.contextLines).toBe(60);
+    expect(prose.maxTokens).toBe(160);
+    expect(prose.format === "next-edit" && prose.formatMarker).toBe("");
+    expect(prose.format === "next-edit" && prose.crossFileCandidates).toBe(0);
+  });
+
+  it("never widens a smaller configuration", () => {
+    const small = parseConfigurations({
+      local: { endpoint: "http://x/v1", model: "m", format: "next-edit", windowLines: 5, maxTokens: 64 },
+    }).configurations[0];
+
+    if (small === undefined) throw new Error("config missing");
+
+    const prose = proseProfile(small);
+
+    expect(prose.format === "next-edit" && prose.windowLines).toBe(5);
+    expect(prose.maxTokens).toBe(64);
+  });
+
+  it("leaves a fim configuration alone", () => {
+    const fim = parseConfigurations({ local }).configurations[0];
+
+    if (fim === undefined) throw new Error("config missing");
+
+    expect(proseProfile(fim)).toEqual(fim);
+  });
+});
+
+describe("isProseLanguage", () => {
+  it("matches only listed languages", () => {
+    expect(isProseLanguage(["markdown"], "markdown")).toBe(true);
+    expect(isProseLanguage(["markdown"], "rust")).toBe(false);
   });
 });
