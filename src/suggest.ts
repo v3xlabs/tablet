@@ -8,6 +8,8 @@ import type { CompletionResult, EndpointFailure } from "./endpoint";
 import { assembleFim } from "./format/fim";
 import { filterCompletion } from "./format/fim-filter";
 import { assembleNextEdit, type EditTarget, readNextEdit } from "./format/next-edit";
+import { renameSpreadFor } from "./format/rename";
+import { whitespaceRepairFor } from "./format/whitespace";
 import { lineSuffixOf, type Snapshot, windowAround } from "./snapshot";
 
 export type Suggestion
@@ -141,85 +143,6 @@ const orderedByRelevance = (suggestions: Suggestion[], target: EditTarget, diagn
   return suggestions.toSorted((left, right) => rank(left) - rank(right));
 };
 
-const whitespaceFixesFor = (target: EditTarget, diagnostics: Diagnostic[]): Suggestion[] => {
-  const fixes: Suggestion[] = [];
-
-  for (const diagnostic of diagnostics) {
-    if (diagnostic.line < target.windowStart || diagnostic.line >= target.windowEnd) continue;
-
-    const line = target.lines[diagnostic.line] ?? "";
-
-    if (diagnostic.message.includes("Trailing spaces not allowed")) {
-      const trimmed = line.trimEnd();
-
-      if (trimmed.length !== line.length) {
-        fixes.push({
-          kind: "edit",
-          path: target.path,
-          startLine: diagnostic.line,
-          startCharacter: trimmed.length,
-          endLine: diagnostic.line,
-          endCharacter: line.length,
-          text: "",
-        });
-      }
-    }
-    else if (diagnostic.message.includes("Expected indentation of")) {
-      const match = diagnostic.message.match(/Expected indentation of (\d+) spaces but found (\d+)/);
-
-      if (match === null || match[1] === undefined) continue;
-
-      const wanted = Number(match[1]);
-
-      if (!Number.isFinite(wanted)) continue;
-
-      const actual = line.length - line.trimStart().length;
-
-      if (actual === wanted || line.trim().length === 0) continue;
-
-      if (actual > wanted) {
-        fixes.push({
-          kind: "edit",
-          path: target.path,
-          startLine: diagnostic.line,
-          startCharacter: wanted,
-          endLine: diagnostic.line,
-          endCharacter: actual,
-          text: "",
-        });
-      }
-      else {
-        fixes.push({
-          kind: "edit",
-          path: target.path,
-          startLine: diagnostic.line,
-          startCharacter: actual,
-          endLine: diagnostic.line,
-          endCharacter: actual,
-          text: " ".repeat(wanted - actual),
-        });
-      }
-    }
-    else if (diagnostic.message.includes("';' expected")) {
-      const trimmed = line.trimEnd();
-
-      if (trimmed.endsWith(";") || trimmed.length === 0) continue;
-
-      fixes.push({
-        kind: "edit",
-        path: target.path,
-        startLine: diagnostic.line,
-        startCharacter: line.length,
-        endLine: diagnostic.line,
-        endCharacter: line.length,
-        text: ";",
-      });
-    }
-  }
-
-  return uniqueBy(fixes, fix => JSON.stringify(fix));
-};
-
 const askFim = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
   const { configuration: config, snapshot } = input;
 
@@ -273,7 +196,16 @@ const askNextEditFor = async (
   if (config.format !== "next-edit") return { kind: "none", reason: "the active configuration is for the other format" };
 
   const diagnostics = target.path === input.snapshot.path ? input.diagnostics : dependencies.diagnosticsFor(target.path);
-  const whitespaceFixes = whitespaceFixesFor(target, diagnostics);
+  const repair = whitespaceRepairFor(target, diagnostics);
+  const derived = uniqueBy([...renameSpreadFor(target, input.changes), ...repair.edits], item => JSON.stringify(item));
+  const cursorLine = target.cursor?.line;
+
+  // a repair the extension worked out for itself, on the very line the reader is on, is
+  // not worth a round trip: the answer is already in hand before the request would return
+  if (cursorLine !== undefined && derived.some(edit => edit.kind === "edit" && edit.startLine === cursorLine)) {
+    return { kind: "suggestions", suggestions: orderedByRelevance(derived, target, diagnostics) };
+  }
+
   const assembled = assembleNextEdit({
     template: config.template,
     chunkTemplate: config.chunkTemplate,
@@ -301,19 +233,25 @@ const askNextEditFor = async (
 
   const answer = await dependencies.complete(assembled.prompt);
 
-  if (!answer.ok) {
-    return whitespaceFixes.length > 0
-      ? { kind: "suggestions", suggestions: orderedByRelevance(whitespaceFixes, target, diagnostics) }
-      : { kind: "failure", failure: answer.failure };
-  }
+  // the formatter is the last thing offered, never the first: it rewrites the whole file,
+  // so anything more precise, from the model or from the window, outranks it
+  const withoutModel = (): SuggestResult | undefined => {
+    if (derived.length > 0) return { kind: "suggestions", suggestions: orderedByRelevance(derived, target, diagnostics) };
+
+    return repair.requiresFormatter ? { kind: "suggestions", suggestions: [{ kind: "format", path: target.path }] } : undefined;
+  };
+
+  if (!answer.ok) return withoutModel() ?? { kind: "failure", failure: answer.failure };
 
   const modelEdits = orderedByRelevance(editsFrom(answer.texts, target, config.formatMarker, config.cursorMarker), target, diagnostics);
 
-  if (modelEdits.length === 0 && whitespaceFixes.length > 0) {
-    return { kind: "suggestions", suggestions: orderedByRelevance(whitespaceFixes, target, diagnostics) };
+  if (modelEdits.length === 0) {
+    const fallback = withoutModel();
+
+    if (fallback !== undefined) return fallback;
   }
 
-  const combined = uniqueBy([...whitespaceFixes, ...modelEdits], item => JSON.stringify(item));
+  const combined = uniqueBy([...derived, ...modelEdits], item => JSON.stringify(item));
   const suggestions = orderedByRelevance(combined, target, diagnostics);
 
   writeCache(dependencies.cache, assembled.prompt, suggestions);
@@ -430,24 +368,16 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
 
   const nearby = await recentFileChunks(input, dependencies, config.contextFiles, config.windowLines);
   const withContext = { ...input, chunks: [...input.chunks, ...nearby] };
-  const isEmpty = input.diagnostics.length === 0
-    && input.changes.length === 0
-    && input.candidatePaths.length === 0;
-  let localReason: string | undefined;
+  const local = await askNextEditFor(withContext, dependencies, localTarget(input, config.windowLines));
 
-  if (!isEmpty) {
-    const local = await askNextEditFor(withContext, dependencies, localTarget(input, config.windowLines));
+  if (local.kind !== "none") return local;
 
-    if (local.kind !== "none") return local;
+  const atDiagnostic = diagnosticTarget(input, config.windowLines);
 
-    localReason = local.reason;
-    const atDiagnostic = diagnosticTarget(input, config.windowLines);
+  if (atDiagnostic !== undefined) {
+    const there = await askNextEditFor(withContext, dependencies, atDiagnostic);
 
-    if (atDiagnostic !== undefined) {
-      const there = await askNextEditFor(withContext, dependencies, atDiagnostic);
-
-      if (there.kind !== "none") return there;
-    }
+    if (there.kind !== "none") return there;
   }
 
   const candidates = input.candidatePaths
@@ -488,14 +418,18 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
 
   if (tail !== undefined) return { kind: "suggestions", suggestions: [tail] };
 
-  if (isEmpty) return { kind: "none", reason: "no diagnostics, changes, or candidates to act on" };
-
   const reason = asked === 0
-    ? (localReason ?? "nothing to fix")
-    : `${localReason ?? "nothing to fix locally"}, and none of the ${asked} candidate file(s) needed changes either`;
+    ? local.reason
+    : `${local.reason}, and none of the ${asked} candidate file(s) needed changes either`;
 
   return { kind: "none", reason };
 };
 
-export const suggest = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> =>
-  (input.configuration.format === "fim" ? askFim(input, dependencies) : askNextEdit(input, dependencies));
+export const suggest = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
+  // the prompt is assembled below this line, so the file that must never reach a prompt is
+  // refused here rather than at each caller: completing the next line of a .env is exactly
+  // the suggestion a secret should never get
+  if (isSecretPath(input.snapshot.path)) return { kind: "none", reason: "the file holds secrets, so nothing was sent" };
+
+  return input.configuration.format === "fim" ? askFim(input, dependencies) : askNextEdit(input, dependencies);
+};

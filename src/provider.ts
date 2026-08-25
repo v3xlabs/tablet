@@ -139,14 +139,6 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     // prose gets a bounded profile: the model answers a sentence, not a paragraph
     const config = isProse ? proseProfile(active.configuration) : active.configuration;
 
-    // a file the reader is editing for its secrets is never sent to the model: completing
-    // the next line of a .env is exactly the suggestion a secret should never get
-    if (isSecretPath(relativePath(document.uri))) {
-      renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "secret file, refusing to suggest" }, runtime.isDev);
-
-      return;
-    }
-
     // a jump to an edit moves the cursor, which re-asks this provider. While the document
     // has not changed, the answer has not either, so the held suggestions are re-served
     // rather than replaced by a fresh request the model may answer differently. A plain

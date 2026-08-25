@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import type { Diagnostic } from "../src/context/diagnostics";
 import type { RecentEdit } from "../src/context/recent-edits";
+import { authoredCases } from "./authored";
 import { burstCases } from "./bursts";
 import { diagnoseTypescript } from "./diagnose";
 import { applyFault, autoFaults, endOf, type Fault, lineMatching, type Mutation } from "./faults";
@@ -421,7 +422,7 @@ for (const [variant, cursor] of [
   });
 }
 
-for (const authored of burstCases) writeCase(authored);
+for (const authored of [...burstCases, ...authoredCases]) writeCase(authored);
 
 const notesStale = [
   "# Release checklist",

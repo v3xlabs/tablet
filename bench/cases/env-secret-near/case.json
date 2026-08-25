@@ -1,0 +1,20 @@
+{
+  "caseId": "env-secret-near",
+  "category": "secret",
+  "variant": "near",
+  "language": "dotenv",
+  "targetPath": ".env",
+  "cursor": {
+    "line": 1,
+    "character": 52
+  },
+  "files": {
+    ".env": "files/.env"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false,
+  "previousFiles": {}
+}

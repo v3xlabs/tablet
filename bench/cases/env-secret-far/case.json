@@ -1,0 +1,20 @@
+{
+  "caseId": "env-secret-far",
+  "category": "secret",
+  "variant": "far",
+  "language": "dotenv",
+  "targetPath": ".env",
+  "cursor": {
+    "line": 3,
+    "character": 9
+  },
+  "files": {
+    ".env": "files/.env"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false,
+  "previousFiles": {}
+}

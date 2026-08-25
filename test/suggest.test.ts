@@ -294,45 +294,6 @@ describe("suggest, asking around a diagnostic", () => {
   });
 });
 
-describe("suggest, ranking several corrections from one reply", () => {
-  it("puts the fix at the flagged line ahead of an invention further away", async () => {
-    const broken: Snapshot = {
-      path: "src/test.ts",
-      languageId: "typescript",
-      lines: ["const hello = () => {", "      log(\"hi\");", "};", "", "const other = 1;"],
-      cursorLine: 1,
-      cursorCharacter: 6,
-    };
-
-    const reply = { ok: true as const, texts: ["const hello = () => {\n  log(\"hi\");\n};\n\nconst other = 1;\n\nhello();"] };
-    const { deps: d } = dependencies([reply]);
-
-    const result = await suggest(
-      input({
-        configuration: noCrossFile,
-        snapshot: broken,
-        diagnostics: [{ line: 1, character: 0, severity: "warning", source: "eslint", message: "Expected indentation of 2 spaces but found 6." }],
-      }),
-      d,
-    );
-
-    expect(result.kind).toBe("suggestions");
-
-    const suggestions = result.kind === "suggestions" ? result.suggestions : [];
-
-    expect(suggestions).toHaveLength(2);
-    expect(suggestions[0]).toEqual({
-      kind: "edit",
-      path: "src/test.ts",
-      startLine: 1,
-      startCharacter: 2,
-      endLine: 1,
-      endCharacter: 6,
-      text: "",
-    });
-  });
-});
-
 describe("focusLine", () => {
   it("points at the line still holding the identifier the edit removed", () => {
     const lines = ["import {User} from './user';", "", "const a = user.name;"];
@@ -365,7 +326,7 @@ describe("suggest, saying why nothing came back", () => {
       d,
     );
 
-    expect(result).toEqual({ kind: "none", reason: "no diagnostics, changes, or candidates to act on" });
+    expect(result).toEqual({ kind: "none", reason: "the model returned src/user.ts unchanged" });
   });
 });
 
@@ -375,6 +336,32 @@ const tailSnapshot = (lines: string[]): Snapshot => ({
   lines,
   cursorLine: 0,
   cursorCharacter: 12,
+});
+
+describe("suggest, refusing a secret file", () => {
+  const dotenv: Snapshot = {
+    path: ".env",
+    languageId: "dotenv",
+    lines: ["STRIPE_SECRET_KEY=sk_live_51H8xQ2eZvKYlo2Cabcdefghij", "PORT=3000"],
+    cursorLine: 1,
+    cursorCharacter: 9,
+  };
+
+  it("sends no prompt and says why", async () => {
+    const { prompts, deps: d } = dependencies([{ ok: true, texts: ["PORT=3000\nHOST=localhost"] }]);
+    const result = await suggest(input({ configuration: nextEdit, snapshot: dotenv }), d);
+
+    expect(prompts).toEqual([]);
+    expect(result).toEqual({ kind: "none", reason: "the file holds secrets, so nothing was sent" });
+  });
+
+  it("refuses on the completion format too", async () => {
+    const { prompts, deps: d } = dependencies([{ ok: true, texts: ["localhost"] }]);
+
+    await suggest(input({ configuration: fim, snapshot: dotenv }), d);
+
+    expect(prompts).toEqual([]);
+  });
 });
 
 describe("suggest, owning the file tail", () => {
@@ -420,7 +407,7 @@ describe("suggest, owning the file tail", () => {
     const { deps: d } = dependencies([settled]);
     const result = await suggest(input({ configuration: noCrossFile, snapshot: tailSnapshot(["const a = 1;", ""]) }), d);
 
-    expect(result).toEqual({ kind: "none", reason: "no diagnostics, changes, or candidates to act on" });
+    expect(result).toEqual({ kind: "none", reason: "the model returned src/tail.ts unchanged" });
   });
 });
 

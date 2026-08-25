@@ -125,7 +125,7 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
   if (result.kind === "invalid") return { outcome: "error", detail: `template names ${result.unknown.join(", ")}` };
 
   if (result.kind === "none") {
-    if (spec.category === "clean") return { outcome: "pass" };
+    if (spec.category === "clean" || spec.category === "secret") return { outcome: "pass" };
 
     return round === 0
       ? { outcome: "no-op", detail: result.reason }
@@ -136,7 +136,7 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
 
   if (first === undefined) return { outcome: "no-op", detail: "empty suggestion list" };
 
-  if (spec.category === "clean") return { outcome: "false-positive", detail: JSON.stringify(first).slice(0, 160) };
+  if (spec.category === "clean" || spec.category === "secret") return { outcome: "false-positive", detail: JSON.stringify(first).slice(0, 160) };
 
   if (first.kind === "format") return spec.allowFormat ? { outcome: "format-pass" } : { outcome: "format-wrong" };
 
@@ -202,11 +202,23 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
 
   let requests = 0;
   let rounds = 0;
+  let hasLeaked = false;
   const started = Date.now();
+
+  // for a secret case the outcome is not enough: the file must reach no prompt at all,
+  // so every prompt is checked for a line of it on the way out
+  const secretLines = spec.category === "secret"
+    ? Array.from(files.values())
+        .flatMap(text => text.split("\n"))
+        .map(line => line.trim())
+        .filter(line => line.length > 12)
+    : [];
 
   const dependencies = {
     complete: async (prompt: string) => {
       requests++;
+
+      if (secretLines.some(line => prompt.includes(line))) hasLeaked = true;
 
       for (let attempt = 0; attempt < 8; attempt++) {
         const answer = await askOnce(prompt);
@@ -275,6 +287,8 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
 
     verdict = { outcome: "wrong-edit", detail: `still diverging after ${round + 1} round(s): ${divergence(files, expected)}` };
   }
+
+  if (hasLeaked) verdict = { outcome: "wrong-edit", detail: "a prompt carried a line of the secret file" };
 
   return {
     caseId,
