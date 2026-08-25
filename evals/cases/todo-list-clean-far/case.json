@@ -1,0 +1,19 @@
+{
+  "caseId": "todo-list-clean-far",
+  "category": "clean",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/todo-list.tsx",
+  "cursor": {
+    "line": 19,
+    "character": 34
+  },
+  "files": {
+    "src/components/todo-list.tsx": "files/todo-list.tsx"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

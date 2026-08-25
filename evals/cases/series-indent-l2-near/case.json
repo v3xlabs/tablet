@@ -1,0 +1,29 @@
+{
+  "caseId": "series-indent-l2-near",
+  "category": "indent",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 1,
+    "character": 21
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 1,
+      "character": 0,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Expected indentation of 2 spaces but found 7."
+    }
+  ],
+  "allowFormat": true
+}

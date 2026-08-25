@@ -1,0 +1,29 @@
+{
+  "caseId": "inventory-missing-line-l34-near",
+  "category": "missing-line",
+  "variant": "near",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 33,
+    "character": 20
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {
+    "src/inventory.py": "expected/inventory.py"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 34,
+      "character": 8,
+      "severity": "error",
+      "source": "Pylance",
+      "message": "Expected indented block"
+    }
+  ],
+  "allowFormat": false
+}

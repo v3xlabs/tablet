@@ -1,0 +1,29 @@
+{
+  "caseId": "series-duplicate-l19-near",
+  "category": "duplicate",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 18,
+    "character": 46
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 18,
+      "character": 8,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot redeclare block-scoped variable 'samples'."
+    }
+  ],
+  "allowFormat": false
+}

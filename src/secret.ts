@@ -37,7 +37,7 @@ export const resolveSecret = async (spec: SecretSpec, source: SecretSource): Pro
   const stored = await source.read(spec.name);
 
   return stored === undefined || stored === ""
-    ? { ok: false, problem: `no key named ${spec.name} is stored, run the "tablet: Set an api key" command` }
+    ? { ok: false, problem: `no key named ${spec.name} is stored, run the "tablet: Store a named key" command` }
     : { ok: true, value: stored };
 };
 

@@ -1,0 +1,29 @@
+{
+  "caseId": "series-missing-punct-l2-near",
+  "category": "missing-punct",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 1,
+    "character": 15
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 1,
+      "character": 15,
+      "severity": "error",
+      "source": "ts",
+      "message": "';' expected."
+    }
+  ],
+  "allowFormat": false
+}

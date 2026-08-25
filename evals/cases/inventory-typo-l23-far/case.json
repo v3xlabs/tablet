@@ -1,0 +1,29 @@
+{
+  "caseId": "inventory-typo-l23-far",
+  "category": "typo",
+  "variant": "far",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 14,
+    "character": 38
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {
+    "src/inventory.py": "expected/inventory.py"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 22,
+      "character": 20,
+      "severity": "error",
+      "source": "Pylance",
+      "message": "Cannot access attribute \"itmes\" for class \"Inventory\""
+    }
+  ],
+  "allowFormat": false
+}

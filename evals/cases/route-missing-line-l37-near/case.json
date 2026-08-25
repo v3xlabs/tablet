@@ -1,0 +1,29 @@
+{
+  "caseId": "route-missing-line-l37-near",
+  "category": "missing-line",
+  "variant": "near",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 36,
+    "character": 14
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 32,
+      "character": 7,
+      "severity": "error",
+      "source": "ts",
+      "message": "JSX element 'Show' has no corresponding closing tag."
+    }
+  ],
+  "allowFormat": false
+}

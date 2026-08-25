@@ -1,0 +1,21 @@
+{
+  "caseId": "series-truncated-l45-near",
+  "category": "truncated",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 44,
+    "character": 43
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

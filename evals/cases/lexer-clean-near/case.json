@@ -1,0 +1,19 @@
+{
+  "caseId": "lexer-clean-near",
+  "category": "clean",
+  "variant": "near",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 37,
+    "character": 43
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

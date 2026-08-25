@@ -1,0 +1,21 @@
+{
+  "caseId": "lexer-indent-l3-near",
+  "category": "indent",
+  "variant": "near",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 2,
+    "character": 21
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {
+    "src/lexer.rs": "expected/lexer.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": true
+}

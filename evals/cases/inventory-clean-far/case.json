@@ -1,0 +1,19 @@
+{
+  "caseId": "inventory-clean-far",
+  "category": "clean",
+  "variant": "far",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 13,
+    "character": 0
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

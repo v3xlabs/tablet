@@ -1,0 +1,19 @@
+{
+  "caseId": "route-clean-far",
+  "category": "clean",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 12,
+    "character": 45
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

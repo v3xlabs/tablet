@@ -1,0 +1,21 @@
+{
+  "caseId": "inventory-truncated-l37-near",
+  "category": "truncated",
+  "variant": "near",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 36,
+    "character": 30
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {
+    "src/inventory.py": "expected/inventory.py"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

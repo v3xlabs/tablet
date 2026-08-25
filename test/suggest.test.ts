@@ -39,6 +39,7 @@ const dependencies = (answers: CompletionResult[], files: Record<string, string[
         return answers[Math.min(prompts.length - 1, answers.length - 1)] ?? { ok: true as const, texts: [] };
       },
       readFile: async (path: string) => files[path],
+      diagnosticsFor: () => [],
       cache: emptyCache<Suggestion[]>(8),
     },
   };
@@ -49,6 +50,7 @@ const input = (overrides: Partial<Parameters<typeof suggest>[0]>) => ({
   snapshot,
   chunks: [],
   changes: [],
+  diagnostics: [],
   repo: "tablet",
   previousLines: undefined,
   candidatePaths: [],
@@ -81,7 +83,7 @@ describe("suggest, fill in the middle", () => {
   it("reports nothing when every choice is filtered out", async () => {
     const { deps: d } = dependencies([{ ok: true, texts: [" ".repeat(3), ""] }]);
 
-    expect(await suggest(input({}), d)).toEqual({ kind: "none" });
+    expect(await suggest(input({}), d)).toEqual({ kind: "none", reason: "every completion was discarded as unusable" });
   });
 
   it("passes an endpoint failure back", async () => {
@@ -113,7 +115,41 @@ describe("suggest, next edit", () => {
 
     expect(result).toEqual({
       kind: "suggestions",
-      suggestions: [{ kind: "edit", path: "src/user.ts", startLine: 1, endLine: 2, text: "  displayName: number;" }],
+      suggestions: [{
+        kind: "edit",
+        path: "src/user.ts",
+        startLine: 1,
+        startCharacter: 15,
+        endLine: 1,
+        endCharacter: 21,
+        text: "number",
+      }],
+    });
+  });
+
+  it("carries a deletion through as an empty replacement", async () => {
+    const emptied: Snapshot = {
+      path: "src/test.ts",
+      languageId: "typescript",
+      lines: ["const a = 1;", "", "", "};"],
+      cursorLine: 0,
+      cursorCharacter: 12,
+    };
+
+    const { deps: d } = dependencies([{ ok: true, texts: ["const a = 1;"] }]);
+    const result = await suggest(input({ configuration: nextEdit, snapshot: emptied }), d);
+
+    expect(result).toEqual({
+      kind: "suggestions",
+      suggestions: [{
+        kind: "edit",
+        path: "src/test.ts",
+        startLine: 0,
+        startCharacter: 12,
+        endLine: 3,
+        endCharacter: 2,
+        text: "",
+      }],
     });
   });
 
@@ -142,8 +178,10 @@ describe("suggest, next edit", () => {
         kind: "edit",
         path: "src/greet.ts",
         startLine: 0,
-        endLine: 1,
-        text: "export const greet = (u: User) => u.displayName;",
+        startCharacter: 36,
+        endLine: 0,
+        endCharacter: 37,
+        text: "displayN",
       }],
     });
   });
@@ -176,6 +214,93 @@ describe("suggest, next edit", () => {
   });
 });
 
+describe("suggest, asking around a diagnostic", () => {
+  const lines = Array.from({ length: 40 }, (_, index) => (index === 30 ? "const x30 = ;" : `const x${index} = ${index};`));
+
+  const farFault: Snapshot = {
+    path: "src/list.ts",
+    languageId: "typescript",
+    lines,
+    cursorLine: 2,
+    cursorCharacter: 5,
+  };
+
+  const diagnostics = [{ line: 30, character: 12, severity: "error", source: "ts", message: "Expression expected." }];
+
+  it("asks a second window around a far diagnostic when the cursor window is clean", async () => {
+    const unchanged = { ok: true as const, texts: [lines.slice(0, 21).join("\n")] };
+    const fixed = { ok: true as const, texts: [lines.slice(20, 40).map(line => (line === "const x30 = ;" ? "const x30 = 30;" : line))
+      .join("\n")] };
+
+    const { prompts, deps: d } = dependencies([unchanged, fixed]);
+    const result = await suggest(input({ configuration: noCrossFile, snapshot: farFault, diagnostics }), d);
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).not.toContain("<|cursor|>");
+    expect(result).toEqual({
+      kind: "suggestions",
+      suggestions: [{
+        kind: "edit",
+        path: "src/list.ts",
+        startLine: 30,
+        startCharacter: 12,
+        endLine: 30,
+        endCharacter: 12,
+        text: "30",
+      }],
+    });
+  });
+
+  it("leaves the second ask alone when the diagnostic sits at the cursor", async () => {
+    const atCursor = { ...farFault, cursorLine: 30, cursorCharacter: 12 };
+    const unchanged = { ok: true as const, texts: [lines.slice(20, 40).join("\n")] };
+    const { prompts, deps: d } = dependencies([unchanged]);
+
+    await suggest(input({ configuration: noCrossFile, snapshot: atCursor, diagnostics }), d);
+
+    expect(prompts).toHaveLength(1);
+  });
+});
+
+describe("suggest, ranking several corrections from one reply", () => {
+  it("puts the fix at the flagged line ahead of an invention further away", async () => {
+    const broken: Snapshot = {
+      path: "src/test.ts",
+      languageId: "typescript",
+      lines: ["const hello = () => {", "      log(\"hi\");", "};", "", "const other = 1;"],
+      cursorLine: 1,
+      cursorCharacter: 6,
+    };
+
+    const reply = { ok: true as const, texts: ["const hello = () => {\n  log(\"hi\");\n};\n\nconst other = 1;\n\nhello();"] };
+    const { deps: d } = dependencies([reply]);
+
+    const result = await suggest(
+      input({
+        configuration: noCrossFile,
+        snapshot: broken,
+        diagnostics: [{ line: 1, character: 0, severity: "warning", source: "eslint", message: "Expected indentation of 2 spaces but found 6." }],
+      }),
+      d,
+    );
+
+    expect(result.kind).toBe("suggestions");
+
+    const suggestions = result.kind === "suggestions" ? result.suggestions : [];
+
+    expect(suggestions).toHaveLength(2);
+    expect(suggestions[0]).toEqual({
+      kind: "edit",
+      path: "src/test.ts",
+      startLine: 1,
+      startCharacter: 2,
+      endLine: 1,
+      endCharacter: 6,
+      text: "",
+    });
+  });
+});
+
 describe("focusLine", () => {
   it("points at the line still holding the identifier the edit removed", () => {
     const lines = ["import {User} from './user';", "", "const a = user.name;"];
@@ -186,5 +311,103 @@ describe("focusLine", () => {
 
   it("falls back to the top of the file when nothing was removed", () => {
     expect(focusLine(["a", "b"], [])).toBe(0);
+  });
+});
+
+describe("suggest, saying why nothing came back", () => {
+  it("names the file the model left alone", async () => {
+    const unchanged = { ok: true as const, texts: ["type User = {\n  displayName: string;\n};"] };
+    const { deps: d } = dependencies([unchanged]);
+
+    const result = await suggest(
+      input({
+        configuration: noCrossFile,
+        snapshot: {
+          path: "src/user.ts",
+          languageId: "typescript",
+          lines: ["type User = {", "  displayName: string;", "};", ""],
+          cursorLine: 1,
+          cursorCharacter: 13,
+        },
+      }),
+      d,
+    );
+
+    expect(result).toEqual({ kind: "none", reason: "the model returned src/user.ts unchanged" });
+  });
+});
+
+const tailSnapshot = (lines: string[]): Snapshot => ({
+  path: "src/tail.ts",
+  languageId: "typescript",
+  lines,
+  cursorLine: 0,
+  cursorCharacter: 12,
+});
+
+describe("suggest, owning the file tail", () => {
+  const settled = { ok: true as const, texts: ["const a = 1;"] };
+
+  it("offers the missing final newline itself once the model settles", async () => {
+    const { deps: d } = dependencies([settled]);
+    const result = await suggest(input({ configuration: noCrossFile, snapshot: tailSnapshot(["const a = 1;"]) }), d);
+
+    expect(result).toEqual({
+      kind: "suggestions",
+      suggestions: [{
+        kind: "edit",
+        path: "src/tail.ts",
+        startLine: 0,
+        startCharacter: 12,
+        endLine: 0,
+        endCharacter: 12,
+        text: "\n",
+      }],
+    });
+  });
+
+  it("trims a run of blank lines at the end to one", async () => {
+    const { deps: d } = dependencies([settled]);
+    const result = await suggest(input({ configuration: noCrossFile, snapshot: tailSnapshot(["const a = 1;", "", "", ""]) }), d);
+
+    expect(result).toEqual({
+      kind: "suggestions",
+      suggestions: [{
+        kind: "edit",
+        path: "src/tail.ts",
+        startLine: 1,
+        startCharacter: 0,
+        endLine: 3,
+        endCharacter: 0,
+        text: "",
+      }],
+    });
+  });
+
+  it("stays quiet when the file already ends with one newline", async () => {
+    const { deps: d } = dependencies([settled]);
+    const result = await suggest(input({ configuration: noCrossFile, snapshot: tailSnapshot(["const a = 1;", ""]) }), d);
+
+    expect(result).toEqual({ kind: "none", reason: "the model returned src/tail.ts unchanged" });
+  });
+});
+
+describe("suggest, showing recent files to the model", () => {
+  it("puts a window of each recent file in the prompt, around what the change removed", async () => {
+    const { prompts, deps: d } = dependencies([{ ok: true, texts: ["unchanged"] }], {
+      "src/greet.ts": ["import x from \"y\";", "", "const greet = (user) => user.name;"],
+    });
+
+    await suggest(
+      input({
+        configuration: nextEdit,
+        candidatePaths: ["src/greet.ts"],
+        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+      }),
+      d,
+    );
+
+    expect(prompts[0]).toContain("<|file_sep|>src/greet.ts\n");
+    expect(prompts[0]).toContain("const greet = (user) => user.name;");
   });
 });

@@ -1,0 +1,29 @@
+{
+  "caseId": "series-missing-punct-l30-away",
+  "category": "missing-punct",
+  "variant": "away",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 4,
+    "character": 2
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 29,
+      "character": 43,
+      "severity": "error",
+      "source": "ts",
+      "message": "';' expected."
+    }
+  ],
+  "allowFormat": false
+}

@@ -1,0 +1,29 @@
+{
+  "caseId": "route-indent-l4-far",
+  "category": "indent",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 11,
+    "character": 0
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 3,
+      "character": 0,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Expected indentation of 2 spaces but found 7."
+    }
+  ],
+  "allowFormat": true
+}

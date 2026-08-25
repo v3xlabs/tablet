@@ -1,0 +1,21 @@
+{
+  "caseId": "route-truncated-l18-near",
+  "category": "truncated",
+  "variant": "near",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 17,
+    "character": 30
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

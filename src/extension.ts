@@ -4,8 +4,8 @@ import { emptyCache } from "./cache";
 import { registerCommands } from "./commands";
 import { blocksFromChange, recordEdit } from "./context/recent-edits";
 import { createProvider } from "./provider";
-import { activeConfig, createRuntime, noteFile, relativePath, type Runtime } from "./runtime";
-import { renderStatus } from "./status-bar";
+import { activeConfig, cancelIdleTrigger, createRuntime, noteFile, relativePath, type Runtime, scheduleIdleTrigger } from "./runtime";
+import { idleStatus, renderStatus } from "./status-bar";
 import type { Suggestion } from "./suggest";
 
 const CHANGE_PADDING = 2;
@@ -38,17 +38,12 @@ const showActive = (runtime: Runtime): void => {
   const active = activeConfig(runtime);
 
   if (active.configuration === undefined) {
-    renderStatus(runtime.status, {
-      kind: "unconfigured",
-      detail: active.problems.length > 0
-        ? active.problems.join("\n")
-        : "no configuration defined, add one under tablet.configurations",
-    });
+    renderStatus(runtime.status, idleStatus(active.names, active.problems));
 
     return;
   }
 
-  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name });
+  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name, detail: "" });
 };
 
 export const activate = (context: vscode.ExtensionContext): void => {
@@ -73,11 +68,15 @@ export const activate = (context: vscode.ExtensionContext): void => {
       if (editor === undefined) return;
 
       trackDocument(runtime, editor.document);
+      scheduleIdleTrigger(runtime, editor);
     }),
+    vscode.window.onDidChangeTextEditorSelection(event => scheduleIdleTrigger(runtime, event.textEditor)),
+    new vscode.Disposable(() => cancelIdleTrigger(runtime)),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (!event.affectsConfiguration("tablet")) return;
 
       runtime.cache = emptyCache<Suggestion[]>(32);
+      runtime.lastServed = undefined;
       showActive(runtime);
     }),
   );

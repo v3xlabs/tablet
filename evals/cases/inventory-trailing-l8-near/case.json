@@ -1,0 +1,21 @@
+{
+  "caseId": "inventory-trailing-l8-near",
+  "category": "trailing",
+  "variant": "near",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 7,
+    "character": 17
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {
+    "src/inventory.py": "expected/inventory.py"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": true
+}

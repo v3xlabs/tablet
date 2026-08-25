@@ -1,0 +1,29 @@
+{
+  "caseId": "todo-list-typo-l22-far",
+  "category": "typo",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/todo-list.tsx",
+  "cursor": {
+    "line": 13,
+    "character": 72
+  },
+  "files": {
+    "src/components/todo-list.tsx": "files/todo-list.tsx"
+  },
+  "expected": {
+    "src/components/todo-list.tsx": "expected/todo-list.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 21,
+      "character": 4,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'setItmes'. Did you mean 'setItems'?"
+    }
+  ],
+  "allowFormat": false
+}

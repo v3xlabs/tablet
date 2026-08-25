@@ -1,0 +1,29 @@
+{
+  "caseId": "series-missing-line-l56-far",
+  "category": "missing-line",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 47,
+    "character": 33
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 56,
+      "character": 6,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'span'."
+    }
+  ],
+  "allowFormat": false
+}

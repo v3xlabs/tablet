@@ -2,7 +2,7 @@ import v3xlabs from "eslint-plugin-v3xlabs";
 
 // eslint and vitest both load their config through a default export
 export default [
-  { ignores: ["dist/**", "vscode-dts/**"] },
+  { ignores: ["dist/**", "vscode-dts/**", "evals/cases/**", "evals/seeds/**", "evals/results/**"] },
   ...v3xlabs.configs.recommended,
   {
     files: ["eslint.config.mjs", "vitest.config.mts"],

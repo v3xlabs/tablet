@@ -1,0 +1,30 @@
+{
+  "caseId": "user-stale-rename-cross",
+  "category": "stale-rename-cross",
+  "variant": "away",
+  "language": "typescript",
+  "targetPath": "src/user.ts",
+  "cursor": {
+    "line": 2,
+    "character": 15
+  },
+  "files": {
+    "src/user.ts": "files/user.ts",
+    "src/profile.ts": "files/profile.ts"
+  },
+  "expected": {
+    "src/profile.ts": "expected/profile.ts"
+  },
+  "candidatePaths": [
+    "src/profile.ts"
+  ],
+  "recentEdits": [
+    {
+      "path": "src/user.ts",
+      "before": "export type User = {\n  id: string;\n  name: string;\n  email: string;\n};",
+      "after": "export type User = {\n  id: string;\n  displayName: string;\n  email: string;\n};"
+    }
+  ],
+  "diagnostics": [],
+  "allowFormat": false
+}

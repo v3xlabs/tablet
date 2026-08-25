@@ -48,10 +48,10 @@ export const blocksFromChange = (
   if (edit === undefined) return undefined;
 
   const start = Math.max(0, edit.startLine - pad);
-  const replacedLines = edit.text === "" ? 0 : edit.text.split("\n").length;
+  const afterEnd = edit.text === "" ? edit.startLine + 1 : edit.startLine + edit.text.split("\n").length;
 
   return {
-    before: before.slice(start, Math.min(before.length, edit.endLine + pad)).join("\n"),
-    after: after.slice(start, Math.min(after.length, edit.startLine + replacedLines + pad)).join("\n"),
+    before: before.slice(start, Math.min(before.length, edit.endLine + 1 + pad)).join("\n"),
+    after: after.slice(start, Math.min(after.length, afterEnd + pad)).join("\n"),
   };
 };

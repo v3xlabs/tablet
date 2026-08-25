@@ -1,0 +1,21 @@
+{
+  "caseId": "lexer-trailing-l20-near",
+  "category": "trailing",
+  "variant": "near",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 19,
+    "character": 44
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {
+    "src/lexer.rs": "expected/lexer.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": true
+}

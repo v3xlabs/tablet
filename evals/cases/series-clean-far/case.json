@@ -1,0 +1,19 @@
+{
+  "caseId": "series-clean-far",
+  "category": "clean",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 27,
+    "character": 0
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

@@ -1,0 +1,19 @@
+{
+  "caseId": "lexer-clean-far",
+  "category": "clean",
+  "variant": "far",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 29,
+    "character": 20
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

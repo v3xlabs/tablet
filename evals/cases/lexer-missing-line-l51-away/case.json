@@ -1,0 +1,29 @@
+{
+  "caseId": "lexer-missing-line-l51-away",
+  "category": "missing-line",
+  "variant": "away",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 25,
+    "character": 51
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {
+    "src/lexer.rs": "expected/lexer.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 51,
+      "character": 8,
+      "severity": "error",
+      "source": "rustc",
+      "message": "cannot find value `tokens` in this scope"
+    }
+  ],
+  "allowFormat": false
+}

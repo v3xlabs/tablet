@@ -1,0 +1,19 @@
+{
+  "caseId": "settings-clean-far",
+  "category": "clean",
+  "variant": "far",
+  "language": "rust",
+  "targetPath": "src/settings.rs",
+  "cursor": {
+    "line": 13,
+    "character": 25
+  },
+  "files": {
+    "src/settings.rs": "files/settings.rs"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

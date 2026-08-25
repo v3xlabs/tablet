@@ -1,0 +1,35 @@
+{
+  "caseId": "user-stale-rename-local-far",
+  "category": "stale-rename",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/user.ts",
+  "cursor": {
+    "line": 13,
+    "character": 3
+  },
+  "files": {
+    "src/user.ts": "files/user.ts"
+  },
+  "expected": {
+    "src/user.ts": "expected/user.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [
+    {
+      "path": "src/user.ts",
+      "before": "export type User = {\n  id: string;\n  name: string;\n  email: string;\n};",
+      "after": "export type User = {\n  id: string;\n  displayName: string;\n  email: string;\n};"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 7,
+      "character": 10,
+      "severity": "error",
+      "source": "ts",
+      "message": "Property 'name' does not exist on type 'User'."
+    }
+  ],
+  "allowFormat": false
+}

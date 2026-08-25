@@ -1,0 +1,21 @@
+{
+  "caseId": "lexer-indent-l6-away",
+  "category": "indent",
+  "variant": "away",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 30,
+    "character": 22
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {
+    "src/lexer.rs": "expected/lexer.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": true
+}

@@ -4,10 +4,10 @@
   "description": "Bring your own endpoint tab completion and next edit prediction",
   "version": "0.1.0",
   "publisher": "v3xlabs",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "private": true,
   "engines": {
-    "vscode": "^1.133.0"
+    "vscode": "^1.126.0"
   },
   "categories": [
     "Programming Languages",
@@ -23,8 +23,18 @@
   "contributes": {
     "commands": [
       {
+        "command": "tablet.addConfiguration",
+        "title": "Add a configuration",
+        "category": "tablet"
+      },
+      {
         "command": "tablet.selectConfiguration",
         "title": "Select configuration",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.removeConfiguration",
+        "title": "Remove a configuration",
         "category": "tablet"
       },
       {
@@ -43,13 +53,13 @@
         "category": "tablet"
       },
       {
-        "command": "tablet.setApiKey",
-        "title": "Set an api key",
+        "command": "tablet.storeKey",
+        "title": "Store a named key",
         "category": "tablet"
       },
       {
-        "command": "tablet.clearApiKey",
-        "title": "Clear an api key",
+        "command": "tablet.forgetKey",
+        "title": "Forget a named key",
         "category": "tablet"
       },
       {
@@ -96,8 +106,8 @@
         },
         "tablet.requestTimeoutMs": {
           "type": "number",
-          "default": 3000,
-          "markdownDescription": "Abort deadline for one request."
+          "default": 10000,
+          "markdownDescription": "Abort deadline for one request. A 7B next-edit model on a busy server routinely needs several seconds."
         },
         "tablet.log": {
           "type": "string",
@@ -227,10 +237,31 @@
               "extraBody": {
                 "type": "object",
                 "markdownDescription": "Merged into the request body verbatim. Ask for several samples here: `{\"n_cmpl\": 3}` on llama.cpp, `{\"n\": 3}` on most other servers."
+              },
+              "diagnosticTemplate": {
+                "type": "string",
+                "markdownDescription": "Rendered once when the file has errors or warnings, substituted into `{{diagnostics}}`. Placeholders: `path`, `text`. Used by `next-edit` only."
+              },
+              "formatMarker": {
+                "type": "string",
+                "markdownDescription": "What the model may reply with, alone, to ask for the document formatter instead of proposing an edit. Substituted into `{{formatMarker}}` in the template, so the instruction and the marker never drift apart. Set it to an empty string to drop the instruction and stop looking for it. Used by `next-edit` only."
+              },
+              "formatTemplate": {
+                "type": "string",
+                "markdownDescription": "The instruction telling the model it may ask for the formatter, substituted into `{{format}}`. Placeholder: `marker`. Rendered as nothing when `formatMarker` is empty. Used by `next-edit` only."
+              },
+              "contextFiles": {
+                "type": "number",
+                "markdownDescription": "How many recently touched files to show the model a window of, taken around the identifier your last change removed. This is what lets a rename in one file be recognised when you move to another. Zero turns it off. Used by `next-edit` only."
               }
             },
             "additionalProperties": false
           }
+        },
+        "tablet.idleTriggerMs": {
+          "type": "number",
+          "default": 400,
+          "markdownDescription": "How long the cursor has to rest before tablet asks for a suggestion, in milliseconds. The editor only asks by itself when the document changes, so this is what makes resting on the line you are about to fix produce a suggestion. Zero turns it off."
         }
       }
     }
@@ -239,11 +270,13 @@
     "build": "node esbuild.mjs --production",
     "watch": "node esbuild.mjs --watch",
     "check": "tsc --noEmit && eslint . && vitest run",
-    "test": "vitest run"
+    "test": "vitest run",
+    "evals:generate": "jiti evals/generate.ts",
+    "evals": "jiti evals/run.ts"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
-    "@types/vscode": "^1.133.0",
+    "@types/vscode": "1.125.0",
     "esbuild": "^0.28.2",
     "eslint": "^10.9.1",
     "eslint-plugin-v3xlabs": "^1.8.1",

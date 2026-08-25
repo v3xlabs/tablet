@@ -1,0 +1,29 @@
+{
+  "caseId": "series-indent-l8-away",
+  "category": "indent",
+  "variant": "away",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 32,
+    "character": 26
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 7,
+      "character": 0,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Expected indentation of 2 spaces but found 7."
+    }
+  ],
+  "allowFormat": true
+}

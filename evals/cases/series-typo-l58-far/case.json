@@ -1,0 +1,29 @@
+{
+  "caseId": "series-typo-l58-far",
+  "category": "typo",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 49,
+    "character": 5
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 57,
+      "character": 33,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'spann'. Did you mean 'span'?"
+    }
+  ],
+  "allowFormat": false
+}

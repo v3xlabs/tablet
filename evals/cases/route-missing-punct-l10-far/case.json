@@ -1,0 +1,29 @@
+{
+  "caseId": "route-missing-punct-l10-far",
+  "category": "missing-punct",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 1,
+    "character": 0
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 9,
+      "character": 15,
+      "severity": "error",
+      "source": "ts",
+      "message": "';' expected."
+    }
+  ],
+  "allowFormat": false
+}

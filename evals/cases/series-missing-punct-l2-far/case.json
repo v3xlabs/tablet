@@ -1,0 +1,29 @@
+{
+  "caseId": "series-missing-punct-l2-far",
+  "category": "missing-punct",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 9,
+    "character": 2
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 1,
+      "character": 15,
+      "severity": "error",
+      "source": "ts",
+      "message": "';' expected."
+    }
+  ],
+  "allowFormat": false
+}

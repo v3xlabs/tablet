@@ -1,0 +1,29 @@
+{
+  "caseId": "todo-list-trailing-l9-far",
+  "category": "trailing",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/todo-list.tsx",
+  "cursor": {
+    "line": 0,
+    "character": 33
+  },
+  "files": {
+    "src/components/todo-list.tsx": "files/todo-list.tsx"
+  },
+  "expected": {
+    "src/components/todo-list.tsx": "expected/todo-list.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 8,
+      "character": 22,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Trailing spaces not allowed."
+    }
+  ],
+  "allowFormat": true
+}

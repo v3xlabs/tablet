@@ -1,0 +1,19 @@
+{
+  "caseId": "inventory-clean-near",
+  "category": "clean",
+  "variant": "near",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 21,
+    "character": 55
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

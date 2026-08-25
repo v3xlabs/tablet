@@ -1,0 +1,29 @@
+{
+  "caseId": "lexer-missing-line-l63-far",
+  "category": "missing-line",
+  "variant": "far",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 54,
+    "character": 48
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {
+    "src/lexer.rs": "expected/lexer.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 61,
+      "character": 24,
+      "severity": "warning",
+      "source": "rustc",
+      "message": "unused variable: `token`"
+    }
+  ],
+  "allowFormat": false
+}

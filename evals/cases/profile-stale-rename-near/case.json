@@ -1,0 +1,45 @@
+{
+  "caseId": "profile-stale-rename-near",
+  "category": "stale-rename",
+  "variant": "near",
+  "language": "typescript",
+  "targetPath": "src/profile.ts",
+  "cursor": {
+    "line": 2,
+    "character": 71
+  },
+  "files": {
+    "src/profile.ts": "files/profile.ts",
+    "src/user.ts": "files/user.ts"
+  },
+  "expected": {
+    "src/profile.ts": "expected/profile.ts"
+  },
+  "candidatePaths": [
+    "src/user.ts"
+  ],
+  "recentEdits": [
+    {
+      "path": "src/user.ts",
+      "before": "export type User = {\n  id: string;\n  name: string;\n  email: string;\n};",
+      "after": "export type User = {\n  id: string;\n  displayName: string;\n  email: string;\n};"
+    }
+  ],
+  "diagnostics": [
+    {
+      "line": 2,
+      "character": 52,
+      "severity": "error",
+      "source": "ts",
+      "message": "Property 'name' does not exist on type 'User'."
+    },
+    {
+      "line": 5,
+      "character": 7,
+      "severity": "error",
+      "source": "ts",
+      "message": "Property 'name' does not exist on type 'User'."
+    }
+  ],
+  "allowFormat": false
+}

@@ -1,0 +1,29 @@
+{
+  "caseId": "inventory-indent-l17-near",
+  "category": "indent",
+  "variant": "near",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 16,
+    "character": 29
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {
+    "src/inventory.py": "expected/inventory.py"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 16,
+      "character": 0,
+      "severity": "error",
+      "source": "Pylance",
+      "message": "Unexpected indentation"
+    }
+  ],
+  "allowFormat": true
+}

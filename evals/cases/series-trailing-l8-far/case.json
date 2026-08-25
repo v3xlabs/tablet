@@ -1,0 +1,29 @@
+{
+  "caseId": "series-trailing-l8-far",
+  "category": "trailing",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 15,
+    "character": 0
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 7,
+      "character": 20,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Trailing spaces not allowed."
+    }
+  ],
+  "allowFormat": true
+}

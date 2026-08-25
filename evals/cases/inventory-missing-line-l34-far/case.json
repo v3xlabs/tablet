@@ -1,0 +1,29 @@
+{
+  "caseId": "inventory-missing-line-l34-far",
+  "category": "missing-line",
+  "variant": "far",
+  "language": "python",
+  "targetPath": "src/inventory.py",
+  "cursor": {
+    "line": 25,
+    "character": 33
+  },
+  "files": {
+    "src/inventory.py": "files/inventory.py"
+  },
+  "expected": {
+    "src/inventory.py": "expected/inventory.py"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 34,
+      "character": 8,
+      "severity": "error",
+      "source": "Pylance",
+      "message": "Expected indented block"
+    }
+  ],
+  "allowFormat": false
+}

@@ -1,0 +1,29 @@
+{
+  "caseId": "route-indent-l22-far",
+  "category": "indent",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 13,
+    "character": 54
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 21,
+      "character": 0,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Expected indentation of 6 spaces but found 11."
+    }
+  ],
+  "allowFormat": true
+}

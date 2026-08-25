@@ -1,0 +1,21 @@
+{
+  "caseId": "settings-indent-l14-far",
+  "category": "indent",
+  "variant": "far",
+  "language": "rust",
+  "targetPath": "src/settings.rs",
+  "cursor": {
+    "line": 5,
+    "character": 1
+  },
+  "files": {
+    "src/settings.rs": "files/settings.rs"
+  },
+  "expected": {
+    "src/settings.rs": "expected/settings.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": true
+}

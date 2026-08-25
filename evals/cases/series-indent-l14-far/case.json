@@ -1,0 +1,29 @@
+{
+  "caseId": "series-indent-l14-far",
+  "category": "indent",
+  "variant": "far",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 5,
+    "character": 0
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 13,
+      "character": 0,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Expected indentation of 2 spaces but found 7."
+    }
+  ],
+  "allowFormat": true
+}

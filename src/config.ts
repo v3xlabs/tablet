@@ -25,10 +25,14 @@ export type Config
   | (Shared & {
     format: "next-edit";
     changeTemplate: string;
+    diagnosticTemplate: string;
+    formatTemplate: string;
     cursorMarker: string;
+    formatMarker: string;
     windowLines: number;
     contextLines: number;
     crossFileCandidates: number;
+    contextFiles: number;
   });
 
 export type ParseResult = {
@@ -152,14 +156,36 @@ const parseOne = (name: string, raw: unknown, problems: string[]): Config | unde
     return undefined;
   }
 
+  const diagnosticTemplate = stringAt(raw, "diagnosticTemplate", NEXT_EDIT_DEFAULTS.diagnosticTemplate);
+  const diagnosticStrays = unknownPlaceholders(diagnosticTemplate, ["path", "text"]);
+
+  if (diagnosticStrays.length > 0) {
+    problems.push(`${name}: diagnosticTemplate names ${diagnosticStrays.join(", ")}, expected path or text`);
+
+    return undefined;
+  }
+
+  const formatTemplate = stringAt(raw, "formatTemplate", NEXT_EDIT_DEFAULTS.formatTemplate);
+  const formatStrays = unknownPlaceholders(formatTemplate, ["marker"]);
+
+  if (formatStrays.length > 0) {
+    problems.push(`${name}: formatTemplate names ${formatStrays.join(", ")}, expected marker`);
+
+    return undefined;
+  }
+
   return {
     ...shared,
     format,
     changeTemplate,
+    diagnosticTemplate,
+    formatTemplate,
     cursorMarker: stringAt(raw, "cursorMarker", NEXT_EDIT_DEFAULTS.cursorMarker),
+    formatMarker: stringAt(raw, "formatMarker", NEXT_EDIT_DEFAULTS.formatMarker),
     windowLines: numberAt(raw, "windowLines", NEXT_EDIT_DEFAULTS.windowLines),
     contextLines: numberAt(raw, "contextLines", NEXT_EDIT_DEFAULTS.contextLines),
     crossFileCandidates: numberAt(raw, "crossFileCandidates", NEXT_EDIT_DEFAULTS.crossFileCandidates),
+    contextFiles: numberAt(raw, "contextFiles", NEXT_EDIT_DEFAULTS.contextFiles),
   };
 };
 

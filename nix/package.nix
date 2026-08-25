@@ -25,6 +25,7 @@
         ../eslint.config.mjs
         ../vitest.config.mts
         ../.vscodeignore
+        ../LICENSE
         ../README.md
         ../src
         ../test
@@ -42,14 +43,14 @@
     pnpmDeps = fetchPnpmDeps {
       inherit (final) pname version src;
       fetcherVersion = 4;
-      hash = "sha256-lKv6bcp3akC1wptORVjWNoIxFZfqds9YlFCbFaF7piw=";
+      hash = "sha256-wZOwkV5FUt0NRBwlJF1ak8/MWTqFXyvu9B8QQcdXdH8=";
     };
 
     buildPhase = ''
       runHook preBuild
       pnpm run check
       pnpm run build
-      vsce package --no-dependencies --allow-missing-repository --skip-license --out tablet.vsix
+      vsce package --no-dependencies --allow-missing-repository --out tablet.vsix
       runHook postBuild
     '';
 
@@ -70,7 +71,7 @@ in
 
     meta = {
       description = "Bring your own endpoint tab completion and next edit prediction";
-      license = lib.licenses.mit;
+      license = lib.licenses.gpl3Only;
       platforms = lib.platforms.all;
     };
   }

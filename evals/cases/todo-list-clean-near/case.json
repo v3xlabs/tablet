@@ -1,0 +1,19 @@
+{
+  "caseId": "todo-list-clean-near",
+  "category": "clean",
+  "variant": "near",
+  "language": "typescriptreact",
+  "targetPath": "src/components/todo-list.tsx",
+  "cursor": {
+    "line": 27,
+    "character": 82
+  },
+  "files": {
+    "src/components/todo-list.tsx": "files/todo-list.tsx"
+  },
+  "expected": {},
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [],
+  "allowFormat": false
+}

@@ -1,0 +1,29 @@
+{
+  "caseId": "route-typo-l16-far",
+  "category": "typo",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 7,
+    "character": 19
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 15,
+      "character": 34,
+      "severity": "error",
+      "source": "ts",
+      "message": "Cannot find name 'expnded'. Did you mean 'expanded'?"
+    }
+  ],
+  "allowFormat": false
+}

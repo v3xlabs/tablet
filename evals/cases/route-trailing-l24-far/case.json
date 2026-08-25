@@ -1,0 +1,29 @@
+{
+  "caseId": "route-trailing-l24-far",
+  "category": "trailing",
+  "variant": "far",
+  "language": "typescriptreact",
+  "targetPath": "src/components/route.tsx",
+  "cursor": {
+    "line": 15,
+    "character": 99
+  },
+  "files": {
+    "src/components/route.tsx": "files/route.tsx"
+  },
+  "expected": {
+    "src/components/route.tsx": "expected/route.tsx"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 23,
+      "character": 30,
+      "severity": "warning",
+      "source": "eslint",
+      "message": "Trailing spaces not allowed."
+    }
+  ],
+  "allowFormat": true
+}

@@ -1,0 +1,29 @@
+{
+  "caseId": "series-missing-line-l22-away",
+  "category": "missing-line",
+  "variant": "away",
+  "language": "typescript",
+  "targetPath": "src/series.ts",
+  "cursor": {
+    "line": 46,
+    "character": 33
+  },
+  "files": {
+    "src/series.ts": "files/series.ts"
+  },
+  "expected": {
+    "src/series.ts": "expected/series.ts"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 18,
+      "character": 8,
+      "severity": "warning",
+      "source": "ts",
+      "message": "'overflow' is declared but its value is never read."
+    }
+  ],
+  "allowFormat": false
+}

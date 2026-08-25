@@ -3,7 +3,8 @@ export type EndpointFailure
     | { kind: "timeout"; }
     | { kind: "aborted"; }
     | { kind: "status"; status: number; detail: string; }
-    | { kind: "malformed"; detail: string; };
+    | { kind: "malformed"; url: string; detail: string; }
+    | { kind: "native-api"; url: string; };
 
 export type CompletionResult
   = | { ok: true; texts: string[]; }
@@ -38,7 +39,10 @@ export const describeFailure = (failure: EndpointFailure): string => {
       return `the endpoint answered ${failure.status}: ${failure.detail}`;
     }
     case "malformed": {
-      return `the endpoint answered something unexpected: ${failure.detail}`;
+      return `${failure.url} answered something unexpected: ${failure.detail}`;
+    }
+    case "native-api": {
+      return `${failure.url} answered in llama.cpp's own format instead of the OpenAI one. Point endpoint at the OpenAI compatible base, which usually ends in /v1.`;
     }
   }
 };
@@ -52,12 +56,27 @@ const readBody = async (response: Response): Promise<string> => {
   }
 };
 
-const readTexts = (body: unknown): string[] | undefined => {
-  if (typeof body !== "object" || body === null) return undefined;
+export type BodyRead
+  = | { kind: "texts"; texts: string[]; }
+    | { kind: "native"; }
+    | { kind: "unreadable"; };
+
+/**
+ * llama.cpp serves its own format at {base}/completions and the OpenAI one at
+ * {base}/v1/completions, so an endpoint missing the /v1 suffix answers with content
+ * rather than choices. Telling those two apart is the difference between a useful
+ * message and "no choices in the body".
+ */
+export const readCompletionBody = (body: unknown): BodyRead => {
+  if (typeof body !== "object" || body === null) return { kind: "unreadable" };
 
   const choices = (body as { choices?: unknown; }).choices;
 
-  if (!Array.isArray(choices)) return undefined;
+  if (!Array.isArray(choices)) {
+    return typeof (body as { content?: unknown; }).content === "string"
+      ? { kind: "native" }
+      : { kind: "unreadable" };
+  }
 
   const texts: string[] = [];
 
@@ -69,7 +88,7 @@ const readTexts = (body: unknown): string[] | undefined => {
     if (typeof text === "string") texts.push(text);
   }
 
-  return texts;
+  return { kind: "texts", texts };
 };
 
 export const complete = async (request: CompletionRequest): Promise<CompletionResult> => {
@@ -120,12 +139,16 @@ export const complete = async (request: CompletionRequest): Promise<CompletionRe
     parsed = await response.json();
   }
   catch (error) {
-    return { ok: false, failure: { kind: "malformed", detail: String(error) } };
+    return { ok: false, failure: { kind: "malformed", url, detail: String(error) } };
   }
 
-  const texts = readTexts(parsed);
+  const read = readCompletionBody(parsed);
 
-  if (texts === undefined) return { ok: false, failure: { kind: "malformed", detail: "no choices in the body" } };
+  if (read.kind === "native") return { ok: false, failure: { kind: "native-api", url } };
 
-  return { ok: true, texts };
+  if (read.kind === "unreadable") {
+    return { ok: false, failure: { kind: "malformed", url, detail: JSON.stringify(parsed).slice(0, 300) } };
+  }
+
+  return { ok: true, texts: read.texts };
 };

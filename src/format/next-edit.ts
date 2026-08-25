@@ -1,8 +1,9 @@
+import { type Diagnostic, renderDiagnostics } from "../context/diagnostics";
 import type { RecentEdit } from "../context/recent-edits";
 import type { Chunk } from "../context/ring-buffer";
 import { type AssembledPrompt, renderChunks } from "./fim";
 import { render } from "./template";
-import { reduceToEdit, type WindowEdit } from "./window-diff";
+import { splitIntoEdits, type WindowEdit } from "./window-diff";
 
 export const NEXT_EDIT_PLACEHOLDERS = [
   "path",
@@ -14,13 +15,15 @@ export const NEXT_EDIT_PLACEHOLDERS = [
   "prefill",
   "start",
   "end",
+  "diagnostics",
+  "format",
 ];
 
 export const NEXT_EDIT_DEFAULTS = {
   template: [
     "<|file_sep|>{{path}}",
     "{{file}}",
-    "{{context}}{{changes}}<|file_sep|>original/{{path}}:{{start}}:{{end}}",
+    "{{diagnostics}}{{context}}{{changes}}{{format}}<|file_sep|>original/{{path}}:{{start}}:{{end}}",
     "{{original}}",
     "<|file_sep|>current/{{path}}:{{start}}:{{end}}",
     "{{current}}",
@@ -28,14 +31,22 @@ export const NEXT_EDIT_DEFAULTS = {
     "",
   ].join("\n"),
   chunkTemplate: "<|file_sep|>{{path}}\n{{text}}\n",
-  changeTemplate: "<|file_sep|>original/{{path}}\n{{before}}\n<|file_sep|>updated/{{path}}\n{{after}}\n",
+  // one block per changed file, named with a .diff suffix, holding literal original: and
+  // updated: sections. This is the shape the sweep write up describes, and the model reacts
+  // to it where it ignored the shape the model card implied.
+  changeTemplate: "<|file_sep|>{{path}}.diff\noriginal:\n{{before}}\nupdated:\n{{after}}\n",
+  diagnosticTemplate: "<|file_sep|>diagnostics/{{path}}\n{{text}}\n",
+  formatTemplate: "<|file_sep|>instructions\nReply with {{marker}} alone to run the formatter on this file instead of proposing an edit.\n",
   cursorMarker: "<|cursor|>",
+  formatMarker: "<|format|>",
   stop: ["<|endoftext|>", "<|file_sep|>"],
   maxTokens: 1024,
   temperature: 0,
-  windowLines: 40,
+  // ten lines above and below the cursor, which the sweep write up reports as its optimum
+  windowLines: 21,
   contextLines: 300,
   crossFileCandidates: 2,
+  contextFiles: 2,
 };
 
 export type EditTarget = {
@@ -51,11 +62,15 @@ export type NextEditInput = {
   template: string;
   chunkTemplate: string;
   changeTemplate: string;
+  diagnosticTemplate: string;
+  formatTemplate: string;
   cursorMarker: string;
+  formatMarker: string;
   contextLines: number;
   target: EditTarget;
   chunks: Chunk[];
   changes: RecentEdit[];
+  diagnostics: Diagnostic[];
 };
 
 export const windowOf = (target: EditTarget): string[] => target.lines.slice(target.windowStart, target.windowEnd);
@@ -89,6 +104,18 @@ const renderChanges = (changeTemplate: string, changes: RecentEdit[]): Assembled
   return unknown.size > 0 ? { ok: false, unknown: [...unknown] } : { ok: true, prompt: parts.join("") };
 };
 
+/**
+ * An empty marker means the reader wants nothing to do with the formatter, so the whole
+ * instruction leaves the prompt rather than staying behind naming an empty token.
+ */
+const renderFormatInstruction = (template: string, marker: string): AssembledPrompt => {
+  if (marker === "") return { ok: true, prompt: "" };
+
+  const result = render(template, { marker });
+
+  return result.ok ? { ok: true, prompt: result.text } : { ok: false, unknown: result.unknown };
+};
+
 export const assembleNextEdit = (input: NextEditInput): AssembledPrompt => {
   const { target } = input;
   const fileStart = Math.max(0, target.windowStart - Math.floor(input.contextLines / 2));
@@ -102,6 +129,14 @@ export const assembleNextEdit = (input: NextEditInput): AssembledPrompt => {
 
   if (!changes.ok) return changes;
 
+  const diagnostics = renderDiagnostics(input.diagnosticTemplate, target.path, input.diagnostics);
+
+  if (!diagnostics.ok) return diagnostics;
+
+  const instruction = renderFormatInstruction(input.formatTemplate, input.formatMarker);
+
+  if (!instruction.ok) return instruction;
+
   const current = withCursor(target, input.cursorMarker);
   const prefillEnd = target.cursor === undefined ? 0 : target.cursor.line - target.windowStart + 1;
 
@@ -110,10 +145,12 @@ export const assembleNextEdit = (input: NextEditInput): AssembledPrompt => {
     file: target.lines.slice(fileStart, fileEnd).join("\n"),
     context: context.prompt,
     changes: changes.prompt,
+    diagnostics: diagnostics.prompt,
     original: (target.previousWindow ?? windowOf(target)).join("\n"),
     current: current.join("\n"),
     prefill: windowOf(target).slice(0, prefillEnd)
       .join("\n"),
+    format: instruction.prompt,
     start: String(target.windowStart + 1),
     end: String(target.windowEnd),
   });
@@ -133,12 +170,49 @@ const withoutHeader = (lines: string[]): string[] => {
   return first !== undefined && HEADER.test(first.trim()) ? lines.slice(1) : lines;
 };
 
-export const readNextEdit = (reply: string, target: EditTarget): WindowEdit | undefined => {
-  const lines = withoutHeader(reply.split("\n"));
+/**
+ * Only the final newline is dropped, never a run of blank lines. Trimming them all would
+ * turn a window that legitimately ends in blank lines into a deletion the model never
+ * proposed, and deleting stray whitespace is one of the things the model is for.
+ */
+const withoutFinalNewline = (lines: string[]): string[] =>
+  (lines.length > 1 && lines[lines.length - 1] === "" ? lines.slice(0, -1) : lines);
 
-  while (lines.length > 0 && (lines[lines.length - 1] ?? "").trim() === "") lines.pop();
+const withoutTrailingBlanks = (lines: string[]): string[] => {
+  let end = lines.length;
 
-  if (lines.length === 0) return undefined;
+  while (end > 0 && lines[end - 1] === "") end--;
 
-  return reduceToEdit(windowOf(target), lines, target.windowStart);
+  return lines.slice(0, end);
+};
+
+export type NextEditReply
+  = | { kind: "edits"; edits: WindowEdit[]; }
+    | { kind: "format"; }
+    | { kind: "none"; };
+
+export const readNextEdit = (reply: string, target: EditTarget, formatMarker: string, cursorMarker = ""): NextEditReply => {
+  // a model that echoes the cursor marker back must not end up inserting it as text
+  const cleaned = cursorMarker === "" ? reply : reply.replaceAll(cursorMarker, "");
+  const lines = withoutFinalNewline(withoutHeader(cleaned.split("\n")));
+
+  if (lines.length === 0) return { kind: "none" };
+
+  const first = lines.find(line => line.trim() !== "");
+
+  if (formatMarker !== "" && first?.trim() === formatMarker) return { kind: "format" };
+
+  // a reply that is entirely blank blanks the window, which no model means on purpose
+  if (first === undefined) return { kind: "none" };
+
+  // how the file's tail is newline-terminated is harness policy, never something to
+  // infer from how many newlines the model happened to emit before the stop token
+  const isAtFileEnd = target.windowEnd === target.lines.length;
+  const window = isAtFileEnd ? withoutTrailingBlanks(windowOf(target)) : windowOf(target);
+
+  if (window.length === 0) return { kind: "none" };
+
+  const edits = splitIntoEdits(window, isAtFileEnd ? withoutTrailingBlanks(lines) : lines, target.windowStart);
+
+  return edits.length === 0 ? { kind: "none" } : { kind: "edits", edits };
 };

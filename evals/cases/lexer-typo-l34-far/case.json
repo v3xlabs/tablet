@@ -1,0 +1,29 @@
+{
+  "caseId": "lexer-typo-l34-far",
+  "category": "typo",
+  "variant": "far",
+  "language": "rust",
+  "targetPath": "src/lexer.rs",
+  "cursor": {
+    "line": 25,
+    "character": 51
+  },
+  "files": {
+    "src/lexer.rs": "files/lexer.rs"
+  },
+  "expected": {
+    "src/lexer.rs": "expected/lexer.rs"
+  },
+  "candidatePaths": [],
+  "recentEdits": [],
+  "diagnostics": [
+    {
+      "line": 33,
+      "character": 27,
+      "severity": "error",
+      "source": "rustc",
+      "message": "no method named `prase` found for struct `String` in the current scope"
+    }
+  ],
+  "allowFormat": false
+}
