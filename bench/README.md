@@ -59,3 +59,4 @@ suggestions. `pass` is an exact match, `pass-loose` differs only in blank lines,
 `format-pass` is a formatter request on a fault a formatter would fix. Everything else
 counts against the run: `no-op`, `wrong-edit`, `wrong-file`, `false-positive` (an edit on a
 clean file), `format-wrong`, `error`.
+

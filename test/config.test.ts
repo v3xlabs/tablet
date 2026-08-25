@@ -101,8 +101,8 @@ describe("proseProfile", () => {
     const prose = proseProfile(nextEdit);
 
     expect(prose.format === "next-edit" && prose.windowLines).toBe(9);
-    expect(prose.format === "next-edit" && prose.contextLines).toBe(60);
-    expect(prose.maxTokens).toBe(160);
+    expect(prose.format === "next-edit" && prose.contextLines).toBe(100);
+    expect(prose.maxTokens).toBe(300);
     expect(prose.format === "next-edit" && prose.formatMarker).toBe("");
     expect(prose.format === "next-edit" && prose.crossFileCandidates).toBe(0);
   });

@@ -208,12 +208,15 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
     complete: async (prompt: string) => {
       requests++;
 
-      for (let attempt = 0; attempt < 4; attempt++) {
+      for (let attempt = 0; attempt < 8; attempt++) {
         const answer = await askOnce(prompt);
 
         if (answer.ok || answer.failure.kind !== "status" || answer.failure.status !== 429) return answer;
 
-        await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
+        const jitter = Math.random() * 1000;
+        const backoff = (1 << attempt) * 1000;
+
+        await new Promise(resolve => setTimeout(resolve, backoff + jitter));
       }
 
       return askOnce(prompt);
@@ -361,17 +364,33 @@ if (SAMPLES > 1) {
 
 tally("category", outcome => outcome.category);
 tally("variant", outcome => outcome.variant);
+tally("language", outcome => outcome.language);
 tally("outcome", outcome => outcome.outcome);
 
 const failures = outcomes.filter(outcome => !isPass(outcome));
 
 if (failures.length > 0) {
-  console.log("\nfailures:");
+  const noops = failures.filter(f => f.outcome === "no-op");
+  const other = failures.filter(f => f.outcome !== "no-op");
 
-  const ordered = failures.toSorted((left, right) => left.caseId.localeCompare(right.caseId));
+  if (other.length > 0) {
+    console.log("\nfailures:");
 
-  for (const failure of ordered) {
-    console.log(`  ${failure.caseId}: ${failure.outcome}${failure.detail === undefined ? "" : ` (${failure.detail.slice(0, 140)})`}`);
+    const ordered = other.toSorted((left, right) => left.caseId.localeCompare(right.caseId));
+
+    for (const failure of ordered) {
+      console.log(`  ${failure.caseId}: ${failure.outcome}${failure.detail === undefined ? "" : ` (${failure.detail.slice(0, 140)})`}`);
+    }
+  }
+
+  if (noops.length > 0) {
+    console.log(`\nmodel had nothing to change on ${noops.length} broken case(s):`);
+
+    const ordered = noops.toSorted((left, right) => left.caseId.localeCompare(right.caseId));
+
+    for (const failure of ordered) {
+      console.log(`  ${failure.caseId}${failure.detail === undefined ? "" : ` (${failure.detail.slice(0, 100)})`}`);
+    }
   }
 }
 

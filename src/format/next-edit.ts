@@ -90,6 +90,47 @@ const withCursor = (target: EditTarget, marker: string): string[] => {
   return [...window.slice(0, offset), marked, ...window.slice(offset + 1)];
 };
 
+const WORDS_RE = /[A-Za-z_$][\w$]*/g;
+
+const wordsIn = (text: string): Set<string> => new Set(Array.from(text.matchAll(WORDS_RE), m => m[0]));
+
+const changeAnalysis = (changes: RecentEdit[]): string => {
+  const renames = new Map<string, string>();
+  const transformations: Array<[string[], string[]]> = [];
+
+  for (const change of changes) {
+    const beforeWords = wordsIn(change.before);
+    const afterWords = wordsIn(change.after);
+
+    const removed = [...beforeWords].filter(w => !afterWords.has(w));
+    const added = [...afterWords].filter(w => !beforeWords.has(w));
+
+    if (removed.length > 0 || added.length > 0) transformations.push([removed, added]);
+
+    if (removed.length === 1 && added.length === 1) renames.set(removed[0]!, added[0]!);
+  }
+
+  const lines: string[] = [];
+
+  if (renames.size > 0) {
+    lines.push(`renamed: ${[...renames].map(([from, to]) => `${from} -> ${to}`).join(", ")}`);
+  }
+
+  const patterns = new Map<string, number>();
+
+  for (const [removed, added] of transformations) {
+    const key = `${removed.join(",")} -> ${added.join(",")}`;
+
+    patterns.set(key, (patterns.get(key) ?? 0) + 1);
+  }
+
+  for (const [key, count] of patterns) {
+    if (count > 1) lines.push(`pattern: ${key} (applied ${count} time(s))`);
+  }
+
+  return lines.length === 0 ? "" : `<|file_sep|>analysis\n${lines.join("\n")}\n`;
+};
+
 const renderChanges = (changeTemplate: string, changes: RecentEdit[]): AssembledPrompt => {
   const unknown = new Set<string>();
   const parts: string[] = [];
@@ -101,7 +142,13 @@ const renderChanges = (changeTemplate: string, changes: RecentEdit[]): Assembled
     else for (const name of result.unknown) unknown.add(name);
   }
 
-  return unknown.size > 0 ? { ok: false, unknown: [...unknown] } : { ok: true, prompt: parts.join("") };
+  if (unknown.size > 0) return { ok: false, unknown: [...unknown] };
+
+  const analysis = changeAnalysis(changes);
+
+  if (analysis !== "") parts.push(analysis);
+
+  return { ok: true, prompt: parts.join("") };
 };
 
 /**

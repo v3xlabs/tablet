@@ -111,7 +111,11 @@ describe("suggest, next edit", () => {
 
   it("turns a rewritten window into an edit", async () => {
     const { deps: d } = dependencies([{ ok: true, texts: ["type User = {\n  displayName: number;\n};"] }]);
-    const result = await suggest(input({ configuration: nextEdit, snapshot: editable }), d);
+    const result = await suggest(input({
+      configuration: nextEdit,
+      snapshot: editable,
+      diagnostics: [{ line: 1, character: 15, severity: "error", source: "ts", message: "Type 'string' is not assignable to type 'number'." }],
+    }), d);
 
     expect(result).toEqual({
       kind: "suggestions",
@@ -137,7 +141,11 @@ describe("suggest, next edit", () => {
     };
 
     const { deps: d } = dependencies([{ ok: true, texts: ["const a = 1;"] }]);
-    const result = await suggest(input({ configuration: nextEdit, snapshot: emptied }), d);
+    const result = await suggest(input({
+      configuration: nextEdit,
+      snapshot: emptied,
+      changes: [{ path: "src/test.ts", before: "const a = 1;\n\n", after: "const a = 1;" }],
+    }), d);
 
     expect(result).toEqual({
       kind: "suggestions",
@@ -357,7 +365,7 @@ describe("suggest, saying why nothing came back", () => {
       d,
     );
 
-    expect(result).toEqual({ kind: "none", reason: "the model returned src/user.ts unchanged" });
+    expect(result).toEqual({ kind: "none", reason: "no diagnostics, changes, or candidates to act on" });
   });
 });
 
@@ -412,7 +420,7 @@ describe("suggest, owning the file tail", () => {
     const { deps: d } = dependencies([settled]);
     const result = await suggest(input({ configuration: noCrossFile, snapshot: tailSnapshot(["const a = 1;", ""]) }), d);
 
-    expect(result).toEqual({ kind: "none", reason: "the model returned src/tail.ts unchanged" });
+    expect(result).toEqual({ kind: "none", reason: "no diagnostics, changes, or candidates to act on" });
   });
 });
 

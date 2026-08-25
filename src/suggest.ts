@@ -124,8 +124,7 @@ const editsFrom = (texts: string[], target: EditTarget, formatMarker: string, cu
 };
 
 /**
- * A reply that touched several places becomes several suggestions, and the editor shows
- * the first. What the linter flags is what the reader wants fixed, and after that the
+ * What the linter flags is what the reader wants fixed, and after that the
  * fix nearest the cursor beats a stray change the model made further away.
  */
 const orderedByRelevance = (suggestions: Suggestion[], target: EditTarget, diagnostics: Diagnostic[]): Suggestion[] => {
@@ -403,19 +402,18 @@ const recentFileChunks = async (
   budget: number,
   span: number,
 ): Promise<Chunk[]> => {
-  const chunks: Chunk[] = [];
-
   const paths = input.candidatePaths
     .filter(path => path !== input.snapshot.path)
+    .filter(path => !isSecretPath(path))
     .slice(0, Math.max(0, budget));
 
-  for (const path of paths) {
-    if (isSecretPath(path)) continue;
+  const reads = await Promise.all(paths.map(path => dependencies.readFile(path)));
+  const chunks: Chunk[] = [];
 
-    const read = await dependencies.readFile(path);
-
+  for (const [index, read] of reads.entries()) {
     if (read === undefined) continue;
 
+    const path = paths[index] ?? "";
     const lines = read.map(line => redactSecrets(line));
     const around = windowAround(lines.length, focusLine(lines, input.changes), span);
 
@@ -432,59 +430,71 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
 
   const nearby = await recentFileChunks(input, dependencies, config.contextFiles, config.windowLines);
   const withContext = { ...input, chunks: [...input.chunks, ...nearby] };
-  const local = await askNextEditFor(withContext, dependencies, localTarget(input, config.windowLines));
+  const isEmpty = input.diagnostics.length === 0
+    && input.changes.length === 0
+    && input.candidatePaths.length === 0;
+  let localReason: string | undefined;
 
-  if (local.kind !== "none") return local;
+  if (!isEmpty) {
+    const local = await askNextEditFor(withContext, dependencies, localTarget(input, config.windowLines));
 
-  const atDiagnostic = diagnosticTarget(input, config.windowLines);
+    if (local.kind !== "none") return local;
 
-  if (atDiagnostic !== undefined) {
-    const there = await askNextEditFor(withContext, dependencies, atDiagnostic);
+    localReason = local.reason;
+    const atDiagnostic = diagnosticTarget(input, config.windowLines);
 
-    if (there.kind !== "none") return there;
+    if (atDiagnostic !== undefined) {
+      const there = await askNextEditFor(withContext, dependencies, atDiagnostic);
+
+      if (there.kind !== "none") return there;
+    }
   }
 
   const candidates = input.candidatePaths
     .filter(path => path !== input.snapshot.path)
+    .filter(path => !isSecretPath(path))
     .slice(0, Math.max(0, config.crossFileCandidates));
+  const asked = candidates.length;
 
-  let asked = 0;
+  if (asked > 0) {
+    const elsewhere = await Promise.allSettled(candidates.map(async (path) => {
+      const read = await dependencies.readFile(path);
 
-  for (const path of candidates) {
-    if (isSecretPath(path)) continue;
+      if (read === undefined) return;
 
-    const read = await dependencies.readFile(path);
+      const lines = read.map(line => redactSecrets(line));
+      const focus = focusLine(lines, input.changes);
+      const flagged = dependencies.diagnosticsFor(path)[0]?.line;
+      const span = windowAround(lines.length, focus === 0 ? flagged ?? 0 : focus, config.windowLines);
 
-    if (read === undefined) continue;
+      return askNextEditFor(withContext, dependencies, {
+        path,
+        lines,
+        windowStart: span.start,
+        windowEnd: span.end,
+        cursor: undefined,
+        previousWindow: input.previousByPath.get(path)?.slice(span.start, span.end),
+      });
+    }));
 
-    asked++;
-
-    const lines = read.map(line => redactSecrets(line));
-
-    // what the recent changes removed is the strongest signal, what the linter flags is next
-    const focus = focusLine(lines, input.changes);
-    const flagged = dependencies.diagnosticsFor(path)[0]?.line;
-    const span = windowAround(lines.length, focus === 0 ? flagged ?? 0 : focus, config.windowLines);
-
-    const elsewhere = await askNextEditFor(withContext, dependencies, {
-      path,
-      lines,
-      windowStart: span.start,
-      windowEnd: span.end,
-      cursor: undefined,
-      previousWindow: input.previousByPath.get(path)?.slice(span.start, span.end),
-    });
-
-    if (elsewhere.kind !== "none") return elsewhere;
+    for (const result of elsewhere) {
+      if (result.status === "fulfilled" && result.value !== undefined && result.value.kind !== "none") {
+        return result.value;
+      }
+    }
   }
 
   const tail = finalNewlineFix(input.snapshot);
 
   if (tail !== undefined) return { kind: "suggestions", suggestions: [tail] };
 
-  if (asked === 0) return local;
+  if (isEmpty) return { kind: "none", reason: "no diagnostics, changes, or candidates to act on" };
 
-  return { kind: "none", reason: `${local.reason}, and so were the ${asked} file(s) looked at next` };
+  const reason = asked === 0
+    ? (localReason ?? "nothing to fix")
+    : `${localReason ?? "nothing to fix locally"}, and none of the ${asked} candidate file(s) needed changes either`;
+
+  return { kind: "none", reason };
 };
 
 export const suggest = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> =>

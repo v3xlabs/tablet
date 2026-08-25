@@ -239,8 +239,8 @@ export const PROSE_LANGUAGE_DEFAULTS = [
 export const isProseLanguage = (languages: string[], languageId: string): boolean => languages.includes(languageId);
 
 const PROSE_WINDOW_LINES = 9;
-const PROSE_CONTEXT_LINES = 60;
-const PROSE_MAX_TOKENS = 160;
+const PROSE_CONTEXT_LINES = 100;
+const PROSE_MAX_TOKENS = 300;
 
 /**
  * Prose answers should read as a sentence ending or one precise correction, not a
