@@ -271,8 +271,8 @@
     "watch": "node esbuild.mjs --watch",
     "check": "tsc --noEmit && eslint . && vitest run",
     "test": "vitest run",
-    "evals:generate": "jiti evals/generate.ts",
-    "evals": "jiti evals/run.ts"
+    "bench:generate": "jiti bench/generate.ts",
+    "bench": "jiti bench/run.ts"
   },
   "devDependencies": {
     "@types/node": "^26.3.0",
@@ -280,6 +280,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.9.1",
     "eslint-plugin-v3xlabs": "^1.8.1",
+    "jiti": "^2.7.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

@@ -6,4 +6,4 @@ dist/
 result
 *.vsix
 .tmp/
-evals/results/
+bench/results/

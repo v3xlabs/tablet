@@ -29,13 +29,13 @@ the window, reachable only through a diagnostic).
 ## Running
 
 ```sh
-pnpm evals:generate            # rebuild cases/ from seeds/ (deterministic)
-pnpm evals                     # full run against the default endpoint
-pnpm evals -- --limit 20 --concurrency 4
-pnpm evals -- --filter series-indent
-pnpm evals -- --no-diagnostics # measure what the diagnostics contribute
-pnpm evals -- --no-format-marker # drop the formatter instruction from the prompt
-pnpm evals -- --windowLines 31 --contextLines 100 --endpoint http://127.0.0.1:8080/v1 --model m
+pnpm bench:generate            # rebuild cases/ from seeds/ (deterministic)
+pnpm bench                     # full run against the default endpoint
+pnpm bench -- --limit 20 --concurrency 4
+pnpm bench -- --filter series-indent
+pnpm bench -- --no-diagnostics # measure what the diagnostics contribute
+pnpm bench -- --no-format-marker # drop the formatter instruction from the prompt
+pnpm bench -- --windowLines 31 --contextLines 100 --endpoint http://127.0.0.1:8080/v1 --model m
 ```
 
 Scoring: the first suggestion is applied to the file it names, then the case is asked
