@@ -16,6 +16,14 @@
   },
   "candidatePaths": [],
   "recentEdits": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "line": 30,
+      "character": 30,
+      "severity": "error",
+      "source": "ts",
+      "message": "';' expected."
+    }
+  ],
   "allowFormat": false
 }

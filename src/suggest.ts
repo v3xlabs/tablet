@@ -142,6 +142,85 @@ const orderedByRelevance = (suggestions: Suggestion[], target: EditTarget, diagn
   return suggestions.toSorted((left, right) => rank(left) - rank(right));
 };
 
+const whitespaceFixesFor = (target: EditTarget, diagnostics: Diagnostic[]): Suggestion[] => {
+  const fixes: Suggestion[] = [];
+
+  for (const diagnostic of diagnostics) {
+    if (diagnostic.line < target.windowStart || diagnostic.line >= target.windowEnd) continue;
+
+    const line = target.lines[diagnostic.line] ?? "";
+
+    if (diagnostic.message.includes("Trailing spaces not allowed")) {
+      const trimmed = line.trimEnd();
+
+      if (trimmed.length !== line.length) {
+        fixes.push({
+          kind: "edit",
+          path: target.path,
+          startLine: diagnostic.line,
+          startCharacter: trimmed.length,
+          endLine: diagnostic.line,
+          endCharacter: line.length,
+          text: "",
+        });
+      }
+    }
+    else if (diagnostic.message.includes("Expected indentation of")) {
+      const match = diagnostic.message.match(/Expected indentation of (\d+) spaces but found (\d+)/);
+
+      if (match === null || match[1] === undefined) continue;
+
+      const wanted = Number(match[1]);
+
+      if (!Number.isFinite(wanted)) continue;
+
+      const actual = line.length - line.trimStart().length;
+
+      if (actual === wanted || line.trim().length === 0) continue;
+
+      if (actual > wanted) {
+        fixes.push({
+          kind: "edit",
+          path: target.path,
+          startLine: diagnostic.line,
+          startCharacter: wanted,
+          endLine: diagnostic.line,
+          endCharacter: actual,
+          text: "",
+        });
+      }
+      else {
+        fixes.push({
+          kind: "edit",
+          path: target.path,
+          startLine: diagnostic.line,
+          startCharacter: actual,
+          endLine: diagnostic.line,
+          endCharacter: actual,
+          text: " ".repeat(wanted - actual),
+        });
+      }
+    }
+    else if (diagnostic.message.includes("';' expected")) {
+      const trimmed = line.trimEnd();
+
+      if (trimmed.endsWith(";") || trimmed.length === 0) continue;
+
+      fixes.push({
+        kind: "edit",
+        path: target.path,
+        startLine: diagnostic.line,
+        startCharacter: line.length,
+        endLine: diagnostic.line,
+        endCharacter: line.length,
+        text: ";",
+      });
+    }
+  }
+
+  return uniqueBy(fixes, fix => JSON.stringify(fix));
+};
+
 const askFim = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
   const { configuration: config, snapshot } = input;
 
@@ -195,7 +274,7 @@ const askNextEditFor = async (
   if (config.format !== "next-edit") return { kind: "none", reason: "the active configuration is for the other format" };
 
   const diagnostics = target.path === input.snapshot.path ? input.diagnostics : dependencies.diagnosticsFor(target.path);
-
+  const whitespaceFixes = whitespaceFixesFor(target, diagnostics);
   const assembled = assembleNextEdit({
     template: config.template,
     chunkTemplate: config.chunkTemplate,
@@ -223,9 +302,20 @@ const askNextEditFor = async (
 
   const answer = await dependencies.complete(assembled.prompt);
 
-  if (!answer.ok) return { kind: "failure", failure: answer.failure };
+  if (!answer.ok) {
+    return whitespaceFixes.length > 0
+      ? { kind: "suggestions", suggestions: orderedByRelevance(whitespaceFixes, target, diagnostics) }
+      : { kind: "failure", failure: answer.failure };
+  }
 
-  const suggestions = orderedByRelevance(editsFrom(answer.texts, target, config.formatMarker, config.cursorMarker), target, diagnostics);
+  const modelEdits = orderedByRelevance(editsFrom(answer.texts, target, config.formatMarker, config.cursorMarker), target, diagnostics);
+
+  if (modelEdits.length === 0 && whitespaceFixes.length > 0) {
+    return { kind: "suggestions", suggestions: orderedByRelevance(whitespaceFixes, target, diagnostics) };
+  }
+
+  const combined = uniqueBy([...whitespaceFixes, ...modelEdits], item => JSON.stringify(item));
+  const suggestions = orderedByRelevance(combined, target, diagnostics);
 
   writeCache(dependencies.cache, assembled.prompt, suggestions);
 

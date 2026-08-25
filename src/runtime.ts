@@ -23,6 +23,7 @@ export type Runtime = {
   declined: { path: string; text: string; } | undefined;
   candidatePaths: string[];
   lastPickLine: number;
+  lastPickHash: string | undefined;
   inFlight: AbortController | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
 };
@@ -43,6 +44,7 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     declined: undefined,
     candidatePaths: [],
     lastPickLine: -9999,
+    lastPickHash: undefined,
     inFlight: undefined,
     idleTimer: undefined,
   };

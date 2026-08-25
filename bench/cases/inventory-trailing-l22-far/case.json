@@ -16,6 +16,14 @@
   },
   "candidatePaths": [],
   "recentEdits": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "line": 21,
+      "character": 55,
+      "severity": "warning",
+      "source": "fmt",
+      "message": "Trailing spaces not allowed."
+    }
+  ],
   "allowFormat": true
 }

@@ -82,7 +82,11 @@ const readFileLines = async (path: string): Promise<string[] | undefined> => {
 };
 
 const updateRing = (runtime: Runtime, snapshot: Snapshot): void => {
-  if (Math.abs(snapshot.cursorLine - runtime.lastPickLine) <= MOVED_FAR_ENOUGH_TO_PICK) return;
+  const hash = snapshot.lines.join("\n");
+  const hasMovedEnough = Math.abs(snapshot.cursorLine - runtime.lastPickLine) > MOVED_FAR_ENOUGH_TO_PICK;
+  const hasContentChanged = runtime.lastPickHash !== hash;
+
+  if (!hasMovedEnough && !hasContentChanged) return;
 
   const settings = vscode.workspace.getConfiguration("tablet").get<Record<string, number>>("ringBuffer") ?? {};
   const picked = chunksAround(
@@ -95,6 +99,7 @@ const updateRing = (runtime: Runtime, snapshot: Snapshot): void => {
 
   runtime.ring = picked.reduce(addChunk, runtime.ring);
   runtime.lastPickLine = snapshot.cursorLine;
+  runtime.lastPickHash = hash;
 };
 
 export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemProvider => ({

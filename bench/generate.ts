@@ -297,7 +297,11 @@ for (const seed of seeds) {
       && mutation.category !== "trailing";
 
     const diagnostics = isCompilerChecked
-      ? diagnoseTypescript(seed.file, mutation.lines.join("\n"))
+      ? (() => {
+          const compiled = diagnoseTypescript(seed.file, mutation.lines.join("\n"));
+
+          return compiled.length > 0 ? compiled : mutation.diagnostics;
+        })()
       : mutation.diagnostics;
 
     for (const { variant, cursor } of variantsFor(mutation, mutation.lines.length)) {

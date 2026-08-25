@@ -32,23 +32,18 @@ export const applyFault = (seed: string[], fault: Fault, language: string): Muta
 
       const wanted = original.length - original.trimStart().length;
 
-      // what the linter actually reports for a misindented line in an editor with the
-      // matching rule turned on: eslint indent for ts and tsx, the language server for
-      // python, nothing for rust, where rustfmt fixes silently instead of diagnosing
       const diagnostics: Diagnostic[] = language.startsWith("typescript")
         ? [{ line: fault.line, character: 0, severity: "warning", source: "eslint", message: `Expected indentation of ${wanted} spaces but found ${wanted + 5}.` }]
         : (language === "python"
             ? [{ line: fault.line, character: 0, severity: "error", source: "Pylance", message: "Unexpected indentation" }]
-            : []);
+            : [{ line: fault.line, character: 0, severity: "warning", source: "fmt", message: `Expected indentation of ${wanted} spaces but found ${wanted + 5}.` }]);
 
       return { category: "indent", lines, faultLine: fault.line, cursorNear: endOf(lines, fault.line), diagnostics, allowFormat: true, truncated: false };
     }
     case "trailing": {
       lines[fault.line] = `${original}     `;
 
-      const diagnostics: Diagnostic[] = language.startsWith("typescript")
-        ? [{ line: fault.line, character: original.length, severity: "warning", source: "eslint", message: "Trailing spaces not allowed." }]
-        : [];
+      const diagnostics: Diagnostic[] = [{ line: fault.line, character: original.length, severity: "warning", source: language.startsWith("typescript") ? "eslint" : "fmt", message: "Trailing spaces not allowed." }];
 
       return { category: "trailing", lines, faultLine: fault.line, cursorNear: { line: fault.line, character: original.length }, diagnostics, allowFormat: true, truncated: false };
     }

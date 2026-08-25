@@ -16,6 +16,14 @@
   },
   "candidatePaths": [],
   "recentEdits": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "line": 23,
+      "character": 0,
+      "severity": "warning",
+      "source": "fmt",
+      "message": "Expected indentation of 4 spaces but found 9."
+    }
+  ],
   "allowFormat": true
 }

@@ -28,7 +28,7 @@ const jaccard = (left: string[], right: string[]): number => {
   return shared / (a.size + b.size - shared);
 };
 
-const SIMILAR_ENOUGH_TO_EVICT = 0.9;
+const SIMILAR_ENOUGH_TO_EVICT = 0.78;
 
 /**
  * Held chunks that overlap the new one are dropped rather than kept alongside it, so the
