@@ -1,0 +1,254 @@
+{
+  "name": "tablet",
+  "displayName": "tablet",
+  "description": "Bring your own endpoint tab completion and next edit prediction",
+  "version": "0.1.0",
+  "publisher": "v3xlabs",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.133.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "enabledApiProposals": [
+    "inlineCompletionsAdditions"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "tablet.selectConfiguration",
+        "title": "Select configuration",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.clearConfigurationOverride",
+        "title": "Use the configuration from settings",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.toggleEnabled",
+        "title": "Toggle automatic suggestions",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.trigger",
+        "title": "Suggest now",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.setApiKey",
+        "title": "Set an api key",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.clearApiKey",
+        "title": "Clear an api key",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.showLog",
+        "title": "Show log",
+        "category": "tablet"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "tablet.trigger",
+        "key": "ctrl+alt+\\",
+        "mac": "cmd+alt+\\",
+        "when": "editorTextFocus && !editorReadonly"
+      }
+    ],
+    "configuration": {
+      "title": "tablet",
+      "properties": {
+        "tablet.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Master switch for automatic suggestions. Manual triggers still work when this is off."
+        },
+        "tablet.activeConfiguration": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Name of the configuration to use, from `#tablet.configurations#`. Left empty with exactly one configuration defined, that one is used. Switching from the status bar overrides this for the session without writing to settings."
+        },
+        "tablet.languages": {
+          "type": "object",
+          "default": {
+            "*": true
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "markdownDescription": "Language identifier to enabled, with `*` as the fallback."
+        },
+        "tablet.debounceMs": {
+          "type": "number",
+          "default": 150,
+          "markdownDescription": "Idle time before an automatic request starts."
+        },
+        "tablet.requestTimeoutMs": {
+          "type": "number",
+          "default": 3000,
+          "markdownDescription": "Abort deadline for one request."
+        },
+        "tablet.log": {
+          "type": "string",
+          "enum": [
+            "off",
+            "error",
+            "debug"
+          ],
+          "default": "error",
+          "markdownDescription": "Output channel verbosity. Assembled prompts are printed at `debug` only. An api key is never printed."
+        },
+        "tablet.ringBuffer": {
+          "type": "object",
+          "default": {
+            "chunks": 16,
+            "chunkLines": 16,
+            "scopeLines": 1024
+          },
+          "properties": {
+            "chunks": {
+              "type": "number",
+              "description": "How many cross file chunks to hold."
+            },
+            "chunkLines": {
+              "type": "number",
+              "description": "Lines per chunk."
+            },
+            "scopeLines": {
+              "type": "number",
+              "description": "How far above and below the cursor to pick chunks from."
+            }
+          },
+          "additionalProperties": false,
+          "markdownDescription": "Bounds for the cross file context ring."
+        },
+        "tablet.configurations": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Named configurations. Each one holds an endpoint, a key, a model, and a prompt format. Exactly one is active at a time.",
+          "additionalProperties": {
+            "type": "object",
+            "required": [
+              "endpoint",
+              "model",
+              "format"
+            ],
+            "properties": {
+              "endpoint": {
+                "type": "string",
+                "description": "Base url of an OpenAI compatible server, for example http://127.0.0.1:8080/v1. The request goes to {endpoint}/completions."
+              },
+              "apiKey": {
+                "type": "string",
+                "default": "",
+                "markdownDescription": "A literal key, `os.environ/NAME` to read the environment, or `secretstorage/NAME` to read a key stored by the `tablet.setApiKey` command."
+              },
+              "headers": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "markdownDescription": "Extra request headers. Each value resolves the same three ways as `apiKey`."
+              },
+              "model": {
+                "type": "string",
+                "description": "Model name sent to the server."
+              },
+              "format": {
+                "type": "string",
+                "enum": [
+                  "fim",
+                  "next-edit"
+                ],
+                "markdownDescription": "`fim` completes at the cursor. `next-edit` rewrites a window of code and can propose an edit away from the cursor."
+              },
+              "template": {
+                "type": "string",
+                "markdownDescription": "The whole prompt, with `{{placeholder}}` substitutions. For `fim`: `prefix`, `suffix`, `path`, `repo`, `context`. For `next-edit`: `path`, `file`, `context`, `changes`, `original`, `current`, `prefill`, `start`, `end`. Left unset, the default for the format is used."
+              },
+              "chunkTemplate": {
+                "type": "string",
+                "markdownDescription": "Rendered once per cross file chunk and joined, substituted into `{{context}}`. Placeholders: `path`, `text`."
+              },
+              "changeTemplate": {
+                "type": "string",
+                "markdownDescription": "Rendered once per recent change and joined, substituted into `{{changes}}`. Placeholders: `path`, `before`, `after`. Used by `next-edit` only."
+              },
+              "cursorMarker": {
+                "type": "string",
+                "markdownDescription": "Inserted at the cursor inside `{{current}}`. Used by `next-edit` only."
+              },
+              "stop": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Stop strings sent with the request."
+              },
+              "maxTokens": {
+                "type": "number",
+                "description": "Generation cap for one request."
+              },
+              "temperature": {
+                "type": "number",
+                "description": "Sampling temperature. Above zero is needed for several distinct samples."
+              },
+              "prefixLines": {
+                "type": "number",
+                "description": "Lines before the cursor sent as prefix. Used by fim."
+              },
+              "suffixLines": {
+                "type": "number",
+                "description": "Lines after the cursor sent as suffix. Used by fim."
+              },
+              "windowLines": {
+                "type": "number",
+                "description": "Lines of the window the model rewrites. Used by next-edit."
+              },
+              "contextLines": {
+                "type": "number",
+                "description": "Lines of the target file sent around the window. Used by next-edit."
+              },
+              "crossFileCandidates": {
+                "type": "number",
+                "markdownDescription": "How many other files to ask about when the local window comes back unchanged. Zero disables cross file suggestions. Used by `next-edit` only."
+              },
+              "extraBody": {
+                "type": "object",
+                "markdownDescription": "Merged into the request body verbatim. Ask for several samples here: `{\"n_cmpl\": 3}` on llama.cpp, `{\"n\": 3}` on most other servers."
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.mjs --production",
+    "watch": "node esbuild.mjs --watch",
+    "check": "tsc --noEmit && eslint . && vitest run",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "@types/vscode": "^1.133.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^10.9.1",
+    "eslint-plugin-v3xlabs": "^1.8.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@11.22.0"
+}
