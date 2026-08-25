@@ -434,4 +434,22 @@ describe("suggest, showing recent files to the model", () => {
     expect(prompts[0]).toContain("<|file_sep|>src/greet.ts\n");
     expect(prompts[0]).toContain("const greet = (user) => user.name;");
   });
+
+  it("redacts a secret held in a cross-file candidate before it reaches the prompt", async () => {
+    const { prompts, deps: d } = dependencies([{ ok: true, texts: ["unchanged"] }], {
+      "src/config.ts": ["export const token = \"ghp_abcdefghijklmnopqrstuvwxyz0123456789AB\";"],
+    });
+
+    await suggest(
+      input({
+        configuration: nextEdit,
+        candidatePaths: ["src/config.ts"],
+        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+      }),
+      d,
+    );
+
+    expect(prompts[0]).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789AB");
+    expect(prompts[0]).toContain("<redacted>");
+  });
 });

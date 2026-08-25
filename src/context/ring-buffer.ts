@@ -1,3 +1,5 @@
+import { isSecretPath, redactSecrets } from "./sanitize";
+
 export type Chunk = {
   path: string;
   startLine: number;
@@ -37,8 +39,15 @@ export const addChunk = (ring: Ring, chunk: Chunk): Ring => {
 
   if (chunk.lines.length < 3) return ring;
 
-  const kept = ring.chunks.filter(held => jaccard(held.lines, chunk.lines) < SIMILAR_ENOUGH_TO_EVICT);
-  const chunks = [...kept, chunk];
+  // a chunk from a secret file never reaches the model, and the text is redacted even
+  // when the path looks ordinary, because a stray key in a readme still leaks
+  if (isSecretPath(chunk.path)) return ring;
+
+  const lines = chunk.lines.map(line => redactSecrets(line));
+  const safe = { ...chunk, lines };
+
+  const kept = ring.chunks.filter(held => jaccard(held.lines, safe.lines) < SIMILAR_ENOUGH_TO_EVICT);
+  const chunks = [...kept, safe];
 
   return { ...ring, chunks: chunks.slice(Math.max(0, chunks.length - ring.limit)) };
 };

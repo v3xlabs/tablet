@@ -3,6 +3,7 @@ import type { Config as Config } from "./config";
 import type { Diagnostic } from "./context/diagnostics";
 import type { RecentEdit } from "./context/recent-edits";
 import type { Chunk } from "./context/ring-buffer";
+import { isSecretPath, redactSecrets } from "./context/sanitize";
 import type { CompletionResult, EndpointFailure } from "./endpoint";
 import { assembleFim } from "./format/fim";
 import { filterCompletion } from "./format/fim-filter";
@@ -319,10 +320,13 @@ const recentFileChunks = async (
     .slice(0, Math.max(0, budget));
 
   for (const path of paths) {
-    const lines = await dependencies.readFile(path);
+    if (isSecretPath(path)) continue;
 
-    if (lines === undefined) continue;
+    const read = await dependencies.readFile(path);
 
+    if (read === undefined) continue;
+
+    const lines = read.map(line => redactSecrets(line));
     const around = windowAround(lines.length, focusLine(lines, input.changes), span);
 
     chunks.push({ path, startLine: around.start, lines: lines.slice(around.start, around.end) });
@@ -357,11 +361,15 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
   let asked = 0;
 
   for (const path of candidates) {
-    const lines = await dependencies.readFile(path);
+    if (isSecretPath(path)) continue;
 
-    if (lines === undefined) continue;
+    const read = await dependencies.readFile(path);
+
+    if (read === undefined) continue;
 
     asked++;
+
+    const lines = read.map(line => redactSecrets(line));
 
     // what the recent changes removed is the strongest signal, what the linter flags is next
     const focus = focusLine(lines, input.changes);
