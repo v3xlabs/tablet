@@ -16,3 +16,6 @@ pnpm-workspace.yaml
 tsconfig.json
 vitest.config.mts
 **/*.map
+.tmp/
+bench/
+.direnv/
