@@ -53,8 +53,8 @@ export const addChunk = (ring: Ring, chunk: Chunk): Ring => {
 };
 
 /**
- * Chunks come from above the prefix and below the suffix, which is material the prompt
- * does not already carry.
+ * Chunks come from just above and just below the span the prompt already carries, so
+ * `scope` is how far the excerpt reaches from the cursor, and the chunk sits outside it.
  */
 export const chunksAround = (
   path: string,
@@ -63,7 +63,7 @@ export const chunksAround = (
   scope: number,
   size: number,
 ): Chunk[] => {
-  const above = { start: Math.max(0, cursorLine - scope), end: Math.max(0, cursorLine - scope + size) };
+  const above = { start: Math.max(0, cursorLine - scope - size), end: Math.max(0, cursorLine - scope) };
   const below = { start: Math.min(lines.length, cursorLine + scope), end: Math.min(lines.length, cursorLine + scope + size) };
 
   return [above, below]

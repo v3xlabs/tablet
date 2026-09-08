@@ -26,12 +26,14 @@ const targetOf = (lines: string[]): EditTarget => ({
 
 const renamedDeclaration: RecentEdit = {
   path: "src/cart.ts",
+  line: 0,
   before: "};\n\nexport const total = (items: Item[]): number => {\n  let sum = 0;",
   after: "};\n\nexport const grandTotal = (items: Item[]): number => {\n  let sum = 0;",
 };
 
 const renamedCallSite: RecentEdit = {
   path: "src/cart.ts",
+  line: 0,
   before: "export const discounted = (cart: Cart): number => {\n  const base = total(cart.items);",
   after: "export const discounted = (cart: Cart): number => {\n  const base = grandTotal(cart.items);",
 };
@@ -65,12 +67,14 @@ describe("renameSpreadFor", () => {
 
     const first: RecentEdit = {
       path: "src/stats.rs",
+      line: 0,
       before: "pub struct Totals {\n    pub views: i32,\n    pub clicks: i32,",
       after: "pub struct Totals {\n    pub views: i64,\n    pub clicks: i32,",
     };
 
     const second: RecentEdit = {
       path: "src/stats.rs",
+      line: 0,
       before: "pub struct Totals {\n    pub views: i64,\n    pub clicks: i32,",
       after: "pub struct Totals {\n    pub views: i64,\n    pub clicks: i64,",
     };
@@ -90,12 +94,14 @@ describe("renameSpreadFor", () => {
   it("ignores a change that inserted a word rather than swapping one", () => {
     const readonlyFirst: RecentEdit = {
       path: "src/settings.ts",
+      line: 0,
       before: "export type Settings = {\n  theme: string;",
       after: "export type Settings = {\n  readonly theme: string;",
     };
 
     const readonlySecond: RecentEdit = {
       path: "src/settings.ts",
+      line: 0,
       before: "  readonly theme: string;\n  locale: string;",
       after: "  readonly theme: string;\n  readonly locale: string;",
     };
@@ -106,6 +112,7 @@ describe("renameSpreadFor", () => {
   it("ignores a change that added or removed lines", () => {
     const grown: RecentEdit = {
       path: "src/cart.ts",
+      line: 0,
       before: "export const total = (items: Item[]): number => {",
       after: "export const grandTotal = (items: Item[]): number => {\n  let sum = 0;",
     };

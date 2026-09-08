@@ -16,6 +16,7 @@ const base = {
   chunkTemplate: FIM_DEFAULTS.chunkTemplate,
   prefixLines: 10,
   suffixLines: 10,
+  budget: 6000,
   snapshot,
   chunks: [],
   repo: "tablet",

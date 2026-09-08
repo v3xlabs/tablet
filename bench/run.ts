@@ -5,8 +5,9 @@ import { fileURLToPath } from "node:url";
 import { emptyCache } from "../src/cache";
 import { isProseLanguage, parseConfigurations, PROSE_LANGUAGE_DEFAULTS, proseProfile } from "../src/config";
 import { type ChangeTracker, trackChange } from "../src/context/recent-edits";
-import { complete } from "../src/endpoint";
+import { complete, type CompletionResult } from "../src/endpoint";
 import { applyEdits } from "../src/format/apply-edits";
+import { estimateTokens } from "../src/format/budget";
 import { suggest, type Suggestion, type SuggestResult } from "../src/suggest";
 import type { CaseSpec } from "./generate";
 
@@ -29,6 +30,8 @@ const FILTER = flagValue("filter");
 const IS_NO_DIAGNOSTICS = hasFlag("no-diagnostics");
 const TIMEOUT_MS = Number(flagValue("timeout") ?? 90_000);
 const SAMPLES = Number(flagValue("samples") ?? 1);
+const FORMAT = flagValue("format") ?? "next-edit";
+const BUDGET = Number(flagValue("budget") ?? 7000);
 
 const overrides: Record<string, unknown> = {};
 
@@ -42,7 +45,7 @@ const parsed = parseConfigurations({
   eval: {
     endpoint: ENDPOINT,
     model: MODEL,
-    format: "next-edit",
+    format: FORMAT,
     ...hasFlag("no-format-marker") && { formatMarker: "" },
     ...overrides,
   },
@@ -173,31 +176,57 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
   return { kind: "applied", edit: first };
 };
 
-const askOnce = (prompt: string) => complete({
-  endpoint: config.endpoint,
-  apiKey: "",
-  headers: {},
-  model: config.model,
-  prompt,
-  maxTokens: config.maxTokens,
-  temperature: config.temperature,
-  stop: config.stop,
-  extraBody: {},
-  timeoutMs: TIMEOUT_MS,
-  signal: new AbortController().signal,
-});
+// the estimate is what the extension trims against, so a prompt over it is a harness
+// fault to report offline, before a request is spent on it
+const askOnce = (prompt: string): Promise<CompletionResult> => {
+  const tokens = estimateTokens(prompt);
+
+  if (tokens > BUDGET - config.maxTokens) {
+    return Promise.resolve({ ok: false, failure: { kind: "context", promptTokens: tokens, contextSize: BUDGET } });
+  }
+
+  return complete({
+    endpoint: config.endpoint,
+    apiKey: "",
+    headers: {},
+    model: config.model,
+    prompt,
+    maxTokens: config.maxTokens,
+    temperature: config.temperature,
+    stop: config.stop,
+    extraBody: {},
+    timeoutMs: TIMEOUT_MS,
+    signal: new AbortController().signal,
+  });
+};
 
 const MAX_ROUNDS = 3;
 
+// a case folder whose fixture is missing on disk is a harness fault to report in the
+// tally, not a reason to stop the run
+const loadOrReport = (caseId: string): ReturnType<typeof loadCase> | Outcome => {
+  try {
+    return loadCase(caseId);
+  }
+  catch (error) {
+    return { caseId, sample: 0, category: "fixture", variant: "", language: "", outcome: "error", requests: 0, rounds: 0, ms: 0, detail: `fixture missing: ${String(error)}` };
+  }
+};
+
 const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
-  const { spec, files, expected, previous } = loadCase(caseId);
+  const loaded = loadOrReport(caseId);
+
+  if ("outcome" in loaded) return { ...loaded, sample };
+
+  const { spec, files, expected, previous } = loaded;
 
   const effective = isProseLanguage(PROSE_LANGUAGE_DEFAULTS, spec.language) ? proseProfile(config) : config;
 
   const tracker: ChangeTracker = {
     lastText: new Map([...files].map(([heldPath, text]) => [heldPath, text])),
     previousByPath: new Map([...previous].map(([heldPath, text]) => [heldPath, text.split("\n")])),
-    log: { edits: [...spec.recentEdits], limit: 8 },
+    // cases written before the log carried a line have none on disk
+    log: { edits: spec.recentEdits.map(edit => ({ line: 0, ...edit })), limit: 8 },
   };
 
   let requests = 0;
@@ -248,6 +277,7 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
     const result = await suggest(
       {
         configuration: effective,
+        budget: BUDGET - effective.maxTokens,
         snapshot: {
           path: spec.targetPath,
           languageId: spec.language,

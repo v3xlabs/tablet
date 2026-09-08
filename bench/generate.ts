@@ -356,6 +356,7 @@ const profileLines = readSeed("profile.ts");
 const staleProfile = profileLines.map(line => line.replaceAll("user.displayName", "user.name"));
 const renameEdit: RecentEdit = {
   path: "src/user.ts",
+  line: 0,
   before: "export type User = {\n  id: string;\n  name: string;\n  email: string;\n};",
   after: "export type User = {\n  id: string;\n  displayName: string;\n  email: string;\n};",
 };

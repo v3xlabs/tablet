@@ -7,8 +7,14 @@ export type StatusState
     | { kind: "working"; name: string; }
     | { kind: "problem"; name: string; detail: string; };
 
-export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, isDevelopment = false): void => {
-  item.command = state.kind === "unconfigured" ? "tablet.addConfiguration" : "tablet.selectConfiguration";
+export type StatusMarks = {
+  isDevelopment: boolean;
+  isPaused: boolean;
+  isCollecting: boolean;
+};
+
+export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, marks: StatusMarks): void => {
+  item.command = "tablet.menu";
 
   switch (state.kind) {
     case "unconfigured": {
@@ -24,7 +30,7 @@ export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, isD
       break;
     }
     case "idle": {
-      item.text = `$(sparkle) ${state.name}`;
+      item.text = `${marks.isPaused ? "$(debug-pause)" : "$(sparkle)"} ${state.name}`;
       item.tooltip = state.detail === ""
         ? `tablet is using ${state.name}`
         : `tablet is using ${state.name}\nlast answer: ${state.detail}`;
@@ -45,9 +51,17 @@ export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, isD
     }
   }
 
+  // collection is never on by surprise: while it runs, the glyph is in the bar
+  if (marks.isCollecting) {
+    item.text += " $(database)";
+    item.tooltip = `${item.tooltip ?? ""}\ncollecting records locally`;
+  }
+
+  if (marks.isPaused) item.tooltip = `${item.tooltip ?? ""}\nautomatic suggestions are paused`;
+
   // the dev host and the installed copy render the same name, so the build the reader
   // is looking at is only ever told apart here
-  if (isDevelopment) {
+  if (marks.isDevelopment) {
     item.text += " (dev)";
     item.tooltip = `development build\n${item.tooltip ?? ""}`;
   }

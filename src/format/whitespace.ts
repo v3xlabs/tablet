@@ -146,6 +146,10 @@ const semicolonFixes = (target: EditTarget, diagnostics: Diagnostic[]): Suggesti
 
     if (trimmed.length === 0 || trimmed.endsWith(";")) continue;
 
+    // a cursor inside the content is the reader still typing the statement, and the
+    // linter has not seen the end of it yet either
+    if (isCursorInsideRun(target, diagnostic.line, 0) && target.cursor !== undefined && target.cursor.character < trimmed.length) continue;
+
     fixes.push({
       kind: "edit",
       path: target.path,

@@ -1,6 +1,7 @@
 import { FIM_DEFAULTS, FIM_PLACEHOLDERS } from "./format/fim";
 import { NEXT_EDIT_DEFAULTS, NEXT_EDIT_PLACEHOLDERS } from "./format/next-edit";
 import { placeholdersIn } from "./format/template";
+import { ZETA_DEFAULTS, ZETA_PLACEHOLDERS } from "./format/zeta";
 
 type Shared = {
   name: string;
@@ -14,6 +15,7 @@ type Shared = {
   extraBody: Record<string, unknown>;
   template: string;
   chunkTemplate: string;
+  contextBudget: number;
 };
 
 export type Config
@@ -33,7 +35,34 @@ export type Config
     contextLines: number;
     crossFileCandidates: number;
     contextFiles: number;
+  })
+  | (Shared & {
+    format: "zeta";
+    changeTemplate: string;
+    diagnosticTemplate: string;
+    cursorMarker: string;
+    windowLines: number;
+    contextLines: number;
+    contextFiles: number;
   });
+
+export const FORMATS = ["fim", "next-edit", "zeta"] as const;
+
+export type Format = Config["format"];
+
+const isFormat = (value: string): value is Format => (FORMATS as readonly string[]).includes(value);
+
+const DEFAULTS_BY_FORMAT = {
+  "fim": FIM_DEFAULTS,
+  "next-edit": NEXT_EDIT_DEFAULTS,
+  "zeta": ZETA_DEFAULTS,
+};
+
+const PLACEHOLDERS_BY_FORMAT = {
+  "fim": FIM_PLACEHOLDERS,
+  "next-edit": NEXT_EDIT_PLACEHOLDERS,
+  "zeta": ZETA_PLACEHOLDERS,
+};
 
 export type ParseResult = {
   configurations: Config[];
@@ -97,15 +126,15 @@ const parseOne = (name: string, raw: unknown, problems: string[]): Config | unde
 
   if (model === "") problems.push(`${name}: model is missing`);
 
-  if (format !== "fim" && format !== "next-edit") {
-    problems.push(`${name}: format must be "fim" or "next-edit"`);
+  if (!isFormat(format)) {
+    problems.push(`${name}: format must be one of ${FORMATS.join(", ")}`);
 
     return undefined;
   }
 
   if (endpoint === "" || model === "") return undefined;
 
-  const defaults = format === "fim" ? FIM_DEFAULTS : NEXT_EDIT_DEFAULTS;
+  const defaults = DEFAULTS_BY_FORMAT[format];
 
   const shared: Shared = {
     name,
@@ -119,10 +148,10 @@ const parseOne = (name: string, raw: unknown, problems: string[]): Config | unde
     extraBody: recordAt(raw, "extraBody"),
     template: stringAt(raw, "template", defaults.template),
     chunkTemplate: stringAt(raw, "chunkTemplate", defaults.chunkTemplate),
+    contextBudget: numberAt(raw, "contextBudget", defaults.contextBudget),
   };
 
-  const allowed = format === "fim" ? FIM_PLACEHOLDERS : NEXT_EDIT_PLACEHOLDERS;
-  const strays = unknownPlaceholders(shared.template, allowed);
+  const strays = unknownPlaceholders(shared.template, PLACEHOLDERS_BY_FORMAT[format]);
 
   if (strays.length > 0) {
     problems.push(`${name}: template names ${strays.join(", ")}, which tablet cannot fill for format ${format}`);
@@ -147,20 +176,42 @@ const parseOne = (name: string, raw: unknown, problems: string[]): Config | unde
     };
   }
 
+  const diagnosticTemplate = stringAt(raw, "diagnosticTemplate", format === "zeta" ? ZETA_DEFAULTS.diagnosticTemplate : NEXT_EDIT_DEFAULTS.diagnosticTemplate);
+  const diagnosticStrays = unknownPlaceholders(diagnosticTemplate, ["path", "text"]);
+
+  if (diagnosticStrays.length > 0) {
+    problems.push(`${name}: diagnosticTemplate names ${diagnosticStrays.join(", ")}, expected path or text`);
+
+    return undefined;
+  }
+
+  if (format === "zeta") {
+    const changeTemplate = stringAt(raw, "changeTemplate", ZETA_DEFAULTS.changeTemplate);
+    const changeStrays = unknownPlaceholders(changeTemplate, ["path", "diff"]);
+
+    if (changeStrays.length > 0) {
+      problems.push(`${name}: changeTemplate names ${changeStrays.join(", ")}, expected path or diff`);
+
+      return undefined;
+    }
+
+    return {
+      ...shared,
+      format,
+      changeTemplate,
+      diagnosticTemplate,
+      cursorMarker: stringAt(raw, "cursorMarker", ZETA_DEFAULTS.cursorMarker),
+      windowLines: numberAt(raw, "windowLines", ZETA_DEFAULTS.windowLines),
+      contextLines: numberAt(raw, "contextLines", ZETA_DEFAULTS.contextLines),
+      contextFiles: numberAt(raw, "contextFiles", ZETA_DEFAULTS.contextFiles),
+    };
+  }
+
   const changeTemplate = stringAt(raw, "changeTemplate", NEXT_EDIT_DEFAULTS.changeTemplate);
   const changeStrays = unknownPlaceholders(changeTemplate, ["path", "before", "after"]);
 
   if (changeStrays.length > 0) {
     problems.push(`${name}: changeTemplate names ${changeStrays.join(", ")}, expected path, before or after`);
-
-    return undefined;
-  }
-
-  const diagnosticTemplate = stringAt(raw, "diagnosticTemplate", NEXT_EDIT_DEFAULTS.diagnosticTemplate);
-  const diagnosticStrays = unknownPlaceholders(diagnosticTemplate, ["path", "text"]);
-
-  if (diagnosticStrays.length > 0) {
-    problems.push(`${name}: diagnosticTemplate names ${diagnosticStrays.join(", ")}, expected path or text`);
 
     return undefined;
   }
@@ -247,9 +298,13 @@ const PROSE_MAX_TOKENS = 300;
  * rewritten paragraph: a small window, a small token budget, no formatter offer, and no
  * cross file wandering. Code settings are left untouched.
  */
-export const proseProfile = (config: Config): Config =>
-  (config.format === "next-edit"
-    ? {
+export const proseProfile = (config: Config): Config => {
+  switch (config.format) {
+    case "fim": {
+      return config;
+    }
+    case "next-edit": {
+      return {
         ...config,
         windowLines: Math.min(config.windowLines, PROSE_WINDOW_LINES),
         contextLines: Math.min(config.contextLines, PROSE_CONTEXT_LINES),
@@ -257,5 +312,16 @@ export const proseProfile = (config: Config): Config =>
         formatMarker: "",
         crossFileCandidates: 0,
         contextFiles: 0,
-      }
-    : config);
+      };
+    }
+    case "zeta": {
+      return {
+        ...config,
+        windowLines: Math.min(config.windowLines, PROSE_WINDOW_LINES),
+        contextLines: Math.min(config.contextLines, PROSE_CONTEXT_LINES),
+        maxTokens: Math.min(config.maxTokens, PROSE_MAX_TOKENS),
+        contextFiles: 0,
+      };
+    }
+  }
+};

@@ -42,6 +42,7 @@ const blank: Snapshot = {
 };
 
 const input = (overrides: Partial<Parameters<typeof suggest>[0]>) => ({
+  budget: 6000,
   configuration: noCrossFile,
   snapshot: blank,
   chunks: [],
@@ -91,7 +92,7 @@ describe("suggest, ranking several corrections from one reply", () => {
     });
   });
 
-  it("answers a fix on the cursor line without asking the model at all", async () => {
+  it("asks the model even when a fix on the cursor line is in hand, and serves the fix when the model has nothing", async () => {
     const trailing: Snapshot = {
       path: "src/test.ts",
       languageId: "typescript",
@@ -103,7 +104,7 @@ describe("suggest, ranking several corrections from one reply", () => {
     const { deps: d, prompts } = dependencies([{ ok: true as const, texts: [] }]);
     const result = await suggest(input({ configuration: noCrossFile, snapshot: trailing }), d);
 
-    expect(prompts).toHaveLength(0);
+    expect(prompts).toHaveLength(1);
     expect(result).toEqual({
       kind: "suggestions",
       suggestions: [{

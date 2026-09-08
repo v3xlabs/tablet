@@ -11,7 +11,7 @@ export type AuthoredCase = {
   files: Record<string, string[]>;
   expected: Record<string, string[]>;
   candidatePaths: string[];
-  recentEdits: { path: string; before: string; after: string; }[];
+  recentEdits: { path: string; line: number; before: string; after: string; }[];
   diagnostics: { line: number; character: number; severity: string; source: string | undefined; message: string; }[];
   allowFormat: boolean;
   previousFiles: Record<string, string[]>;
@@ -46,7 +46,7 @@ const replay = (path: string, snapshots: string[][]): AuthoredCase["recentEdits"
 
     const blocks = blocksFromChange(previous, current, 2);
 
-    if (blocks !== undefined) log = recordEdit(log, { path, before: blocks.before, after: blocks.after });
+    if (blocks !== undefined) log = recordEdit(log, { path, line: blocks.line, before: blocks.before, after: blocks.after });
   }
 
   return log.edits;

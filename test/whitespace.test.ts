@@ -177,3 +177,21 @@ describe("whitespaceRepairFor, missing semicolon", () => {
     expect(whitespaceRepairFor(targetOf(withoutSemicolon), [semicolonDiagnostic("';' expected.")].map(held => ({ ...held, line: 0 }))).edits).toEqual([]);
   });
 });
+
+describe("whitespaceRepairFor, semicolon while typing", () => {
+  it("leaves a line alone while the cursor is inside its content", () => {
+    const typing = targetOf(withoutSemicolon);
+    const line = withoutSemicolon.findIndex(text => !text.trimEnd().endsWith(";") && text.trim() !== "");
+    const midLine = { ...typing, cursor: { line, character: 3 } };
+
+    expect(whitespaceRepairFor(midLine, [semicolonDiagnostic("Missing semicolon.")]).edits).toEqual([]);
+  });
+
+  it("still appends when the cursor rests at the end of the content", () => {
+    const typing = targetOf(withoutSemicolon);
+    const line = withoutSemicolon.findIndex(text => !text.trimEnd().endsWith(";") && text.trim() !== "");
+    const atEnd = { ...typing, cursor: { line, character: (withoutSemicolon[line] ?? "").trimEnd().length } };
+
+    expect(whitespaceRepairFor(atEnd, [semicolonDiagnostic("Missing semicolon.")]).edits).toHaveLength(1);
+  });
+});

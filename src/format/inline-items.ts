@@ -78,7 +78,7 @@ const editItem = async (suggestion: Suggestion, document: vscode.TextDocument, c
   if (requiresJump(target, isSameFile, start, cursor)) item.jumpToPosition = start;
 
   if (isSameFile) {
-    if (config.format === "next-edit") {
+    if (config.format !== "fim") {
       // showRange hides the edit whenever the cursor is outside it, so it has to cover the
       // cursor as well as the edit: an edit offered without a jump is otherwise invisible
       // from a cursor further away than the padding

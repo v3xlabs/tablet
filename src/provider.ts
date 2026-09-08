@@ -1,29 +1,32 @@
 import * as vscode from "vscode";
 
+import type { CollectedRecord, Exchange, Outcome } from "./collect/record";
+import { appendRecord } from "./collect/store";
+import { watchResolution } from "./collect/watch";
 import { isLanguageEnabled, isProseLanguage, proseProfile } from "./config";
 import type { Diagnostic } from "./context/diagnostics";
 import { addChunk, chunksAround } from "./context/ring-buffer";
 import { hasSecret, isSecretPath, redactSecrets } from "./context/sanitize";
 import { complete, describeFailure } from "./endpoint";
+import { estimateTokens } from "./format/budget";
 import { describeItem, formatFallback, itemsFor, uriFor } from "./format/inline-items";
-import { logDebug, logError } from "./logger";
-import { activeConfig, isAutomaticEnabled, noteFile, relativePath, type Runtime } from "./runtime";
+import { logDebug, logError, logInfo } from "./logger";
+import { activeConfig, isAutomaticEnabled, isCollectEnabled, noteFile, type PendingRecord, promptBudget, relativePath, type Runtime, statusMarks } from "./runtime";
 import { parseSecretSpec, resolveAll, resolveSecret, type SecretSource } from "./secret";
-import type { Snapshot } from "./snapshot";
+import { type Snapshot, windowAround } from "./snapshot";
 import { idleStatus, renderStatus } from "./status-bar";
-import { suggest } from "./suggest";
+import { suggest, type SuggestResult } from "./suggest";
 
 const MOVED_FAR_ENOUGH_TO_PICK = 32;
-const ERROR_LIMIT = 30;
-const DIAGNOSTIC_LIMIT = 50;
+const DIAGNOSTIC_LIMIT = 12;
 
 const SEVERITY_NAMES = ["error", "warning", "info", "hint"];
 
 /**
  * Every severity is passed on, because a linter hint is exactly the kind of thing worth
- * fixing next. Errors are never dropped for distance: a syntax error two hundred lines
- * away is what the reader is about to chase. Warnings and hints fill the rest of the
- * budget nearest the cursor first.
+ * fixing next. Errors take the slots first, nearest the cursor first, and warnings and
+ * hints fill what is left. The limit is what keeps a file mid-refactor, with dozens of
+ * type errors, from pushing the prompt past the endpoint's context.
  */
 const diagnosticsFor = (uri: vscode.Uri, cursorLine: number): Diagnostic[] => {
   const all = vscode.languages.getDiagnostics(uri)
@@ -35,15 +38,14 @@ const diagnosticsFor = (uri: vscode.Uri, cursorLine: number): Diagnostic[] => {
       message: entry.message,
     }));
 
-  const errors = all.filter(held => held.severity === "error")
-    .toSorted((left, right) => left.line - right.line)
-    .slice(0, ERROR_LIMIT);
+  const byDistance = (left: Diagnostic, right: Diagnostic): number =>
+    Math.abs(left.line - cursorLine) - Math.abs(right.line - cursorLine);
 
-  const others = all.filter(held => held.severity !== "error")
-    .toSorted((left, right) => Math.abs(left.line - cursorLine) - Math.abs(right.line - cursorLine))
-    .slice(0, Math.max(0, DIAGNOSTIC_LIMIT - errors.length));
+  const errors = all.filter(held => held.severity === "error").toSorted(byDistance);
+  const others = all.filter(held => held.severity !== "error").toSorted(byDistance);
 
-  return [...errors, ...others].toSorted((left, right) => left.line - right.line);
+  return [...errors, ...others].slice(0, DIAGNOSTIC_LIMIT)
+    .toSorted((left, right) => left.line - right.line);
 };
 
 const secretSource = (runtime: Runtime): SecretSource => ({
@@ -93,7 +95,7 @@ const updateRing = (runtime: Runtime, snapshot: Snapshot): void => {
     snapshot.path,
     snapshot.lines,
     snapshot.cursorLine,
-    settings["scopeLines"] ?? 1024,
+    settings["scopeLines"] ?? 150,
     settings["chunkLines"] ?? 16,
   );
 
@@ -102,11 +104,67 @@ const updateRing = (runtime: Runtime, snapshot: Snapshot): void => {
   runtime.lastPickHash = hash;
 };
 
+const outcomeOf = (reason: vscode.InlineCompletionEndOfLifeReason): Outcome => {
+  switch (reason.kind) {
+    case vscode.InlineCompletionEndOfLifeReasonKind.Accepted: {
+      return { kind: "accepted" };
+    }
+    case vscode.InlineCompletionEndOfLifeReasonKind.Rejected: {
+      return { kind: "rejected" };
+    }
+    case vscode.InlineCompletionEndOfLifeReasonKind.Ignored: {
+      return { kind: "ignored", userTypingDisagreed: reason.userTypingDisagreed };
+    }
+  }
+};
+
+const writeRecord = async (runtime: Runtime, record: CollectedRecord): Promise<void> => {
+  try {
+    const file = await appendRecord(runtime.globalStoragePath, record);
+
+    logInfo(runtime.output, `recorded ${record.outcome.kind} suggestion to ${file}`);
+  }
+  catch (error) {
+    logError(runtime.output, `could not write a record: ${String(error)}`);
+  }
+};
+
+/**
+ * An accepted suggestion is its own resolution. A turned down one is only half a record
+ * until the reader shows what they wanted instead, which the watch collects.
+ */
+const settle = (runtime: Runtime, pending: PendingRecord, reason: vscode.InlineCompletionEndOfLifeReason): void => {
+  if (pending.record.outcome.kind !== "unresolved") return;
+
+  const record = { ...pending.record, outcome: outcomeOf(reason) };
+
+  pending.record = record;
+
+  if (record.outcome.kind === "accepted") {
+    void writeRecord(runtime, record);
+
+    return;
+  }
+
+  // a watch still open from the previous suggestion writes what it has and steps aside
+  runtime.watcher?.dispose();
+  runtime.watcher = watchResolution(pending.document, record.window, (resolution) => {
+    runtime.watcher = undefined;
+    void writeRecord(runtime, { ...record, resolution });
+  });
+};
+
+const RECORD_WINDOW_LINES = 21;
+
 export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemProvider => ({
-  // a rejection is the reader saying no to this document state, so the remembered answer
-  // must not come back on the next cursor rest, and nothing else is volunteered for the
-  // same state either
-  handleEndOfLifetime: (_item, reason) => {
+  handleEndOfLifetime: (item, reason) => {
+    const pending = runtime.pending.get(item) ?? runtime.lastPending;
+
+    if (pending !== undefined) settle(runtime, pending, reason);
+
+    // a rejection is the reader saying no to this document state, so the remembered answer
+    // must not come back on the next cursor rest, and nothing else is volunteered for the
+    // same state either
     if (reason.kind !== vscode.InlineCompletionEndOfLifeReasonKind.Rejected) return;
 
     const served = runtime.lastServed;
@@ -125,7 +183,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const active = activeConfig(runtime);
 
     if (active.configuration === undefined) {
-      renderStatus(runtime.status, idleStatus(active.names, active.problems), runtime.isDev);
+      renderStatus(runtime.status, idleStatus(active.names, active.problems), statusMarks(runtime));
 
       return;
     }
@@ -144,14 +202,20 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     // rather than replaced by a fresh request the model may answer differently. A plain
     // completion is anchored to the cursor it was made for and is not re-servable
     const remembered = runtime.lastServed;
+    const reach = config.format === "fim" ? 0 : config.windowLines;
+    const isNearRemembered = remembered !== undefined && remembered.suggestions.some(held =>
+      held.kind === "edit" && Math.abs(held.startLine - position.line) <= reach);
 
+    // a cursor that has moved further than the window from every remembered edit is
+    // looking at something else, and gets a fresh ask
     if (remembered !== undefined
+      && isNearRemembered
       && remembered.path === relativePath(document.uri)
       && remembered.text === document.getText()) {
       const items = await itemsFor(remembered.suggestions.filter(held => held.kind !== "completion"), document, position, config);
 
       if (items.length > 0) {
-        logDebug(runtime.output, `${config.name}: re-served ${items.length} remembered suggestion(s)`);
+        logInfo(runtime.output, `${config.name}: re-served ${items.length} remembered suggestion(s)`);
 
         return items;
       }
@@ -178,7 +242,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const key = await resolveSecret(parseSecretSpec(config.apiKey), secretSource(runtime));
 
     if (!key.ok) {
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: key.problem }, runtime.isDev);
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: key.problem }, statusMarks(runtime));
 
       return;
     }
@@ -186,28 +250,34 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const headers = await resolveAll(config.headers, secretSource(runtime));
 
     if (!headers.ok) {
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: headers.problem }, runtime.isDev);
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail: headers.problem }, statusMarks(runtime));
 
       return;
     }
 
-    renderStatus(runtime.status, { kind: "working", name: config.name }, runtime.isDev);
+    renderStatus(runtime.status, { kind: "working", name: config.name }, statusMarks(runtime));
 
-    const result = await suggest(
+    const exchanges: Exchange[] = [];
+    const diagnostics = diagnosticsFor(document.uri, position.line);
+
+    const ask = (): Promise<SuggestResult> => suggest(
       {
         configuration: config,
+        budget: promptBudget(runtime, config),
         snapshot,
         chunks: runtime.ring.chunks,
         changes: runtime.tracker.log.edits,
-        diagnostics: diagnosticsFor(document.uri, position.line),
+        diagnostics,
         repo: vscode.workspace.workspaceFolders?.[0]?.name ?? "",
         previousByPath: runtime.tracker.previousByPath,
         candidatePaths: runtime.candidatePaths,
       },
       {
         complete: async (prompt) => {
+          logInfo(runtime.output, `asking ${config.name}, ${estimateTokens(prompt)} estimated tokens`);
           logDebug(runtime.output, `prompt for ${config.name}:\n${prompt}`);
 
+          const startedAt = Date.now();
           const answer = await complete({
             endpoint: config.endpoint,
             apiKey: key.value,
@@ -226,6 +296,12 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
             ? `reply for ${config.name}:\n${answer.texts.join("\n---\n")}`
             : `reply for ${config.name}: ${describeFailure(answer.failure)}`);
 
+          exchanges.push({
+            prompt,
+            reply: answer.ok ? { ok: true, texts: answer.texts } : { ok: false, failure: describeFailure(answer.failure) },
+            ms: Date.now() - startedAt,
+          });
+
           return answer;
         },
         readFile: readFileLines,
@@ -238,10 +314,21 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       },
     );
 
+    const first = await ask();
+
+    // the endpoint named its real context size in the refusal, so one more ask with the
+    // budget cut to fit is worth more than reporting the refusal
+    if (first.kind === "failure" && first.failure.kind === "context") {
+      runtime.contextLimit = first.failure.contextSize;
+      logInfo(runtime.output, `${config.name}: ${describeFailure(first.failure)}, asking again within ${promptBudget(runtime, config)} tokens`);
+    }
+
+    const result = first.kind === "failure" && first.failure.kind === "context" ? await ask() : first;
+
     // the answer was computed from snapshotText: if the document moved on while the
     // model was thinking, the edits no longer describe what is on screen
     if (document.getText() !== snapshotText) {
-      logDebug(runtime.output, `${config.name}: document changed during the request, discarding the answer`);
+      logInfo(runtime.output, `${config.name}: document changed during the request, discarding the answer`);
 
       return;
     }
@@ -256,7 +343,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
       logError(runtime.output, `${config.name}: ${detail}`);
 
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, runtime.isDev);
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, statusMarks(runtime));
 
       return;
     }
@@ -265,24 +352,24 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       const detail = `template names ${result.unknown.join(", ")}, which tablet cannot fill`;
 
       logError(runtime.output, `${config.name}: ${detail}`);
-      renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, runtime.isDev);
+      renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, statusMarks(runtime));
 
       return;
     }
 
     if (result.kind === "none") {
-      const fallback = !isProse && config.format === "next-edit" ? await formatFallback(runtime, document, position) : undefined;
+      const fallback = !isProse && config.format !== "fim" ? await formatFallback(runtime, document, position) : undefined;
 
       if (fallback !== undefined) {
         runtime.lastServed = { path: snapshot.path, text: snapshotText, suggestions: [{ kind: "format", path: snapshot.path }] };
-        logDebug(runtime.output, `${config.name}: ${result.reason}, offering the formatter for a flagged line instead`);
-        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "offered the formatter" }, runtime.isDev);
+        logInfo(runtime.output, `${config.name}: ${result.reason}, offering the formatter for a flagged line instead`);
+        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "offered the formatter" }, statusMarks(runtime));
 
         return [fallback];
       }
 
-      logDebug(runtime.output, `${config.name}: no suggestion, ${result.reason}`);
-      renderStatus(runtime.status, { kind: "idle", name: config.name, detail: result.reason }, runtime.isDev);
+      logInfo(runtime.output, `${config.name}: no suggestion, ${result.reason}`);
+      renderStatus(runtime.status, { kind: "idle", name: config.name, detail: result.reason }, statusMarks(runtime));
 
       return;
     }
@@ -305,10 +392,39 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       ? `${safe.length} answer(s) came back, none of them survived as an edit`
       : `${items.length} suggestion(s)`;
 
-    logDebug(runtime.output, `${config.name}: ${detail}`);
+    logInfo(runtime.output, `${config.name}: ${detail} after ${exchanges.length} request(s), ${exchanges.reduce((sum, held) => sum + held.ms, 0)} ms`);
 
-    for (const item of items) logDebug(runtime.output, `  handed to the editor: ${describeItem(item)}`);
-    renderStatus(runtime.status, { kind: "idle", name: config.name, detail }, runtime.isDev);
+    for (const item of items) logInfo(runtime.output, `  handed to the editor: ${describeItem(item)}`);
+    renderStatus(runtime.status, { kind: "idle", name: config.name, detail }, statusMarks(runtime));
+
+    if (items.length > 0 && isCollectEnabled()) {
+      const span = windowAround(snapshot.lines.length, position.line, config.format === "fim" ? RECORD_WINDOW_LINES : config.windowLines);
+      const pending: PendingRecord = {
+        document,
+        record: {
+          recordId: crypto.randomUUID(),
+          timestamp: new Date().toISOString(),
+          workspace: vscode.workspace.workspaceFolders?.[0]?.name ?? "no-workspace",
+          path: snapshot.path,
+          languageId: snapshot.languageId,
+          config: config.name,
+          format: config.format,
+          cursor: { line: position.line, character: position.character },
+          window: { startLine: span.start, endLine: span.end - 1, text: snapshot.lines.slice(span.start, span.end).join("\n") },
+          events: runtime.tracker.log.edits,
+          diagnostics,
+          chunks: runtime.ring.chunks,
+          exchanges,
+          suggestions: safe,
+          outcome: { kind: "unresolved" },
+          resolution: { kind: "unchanged" },
+        },
+      };
+
+      for (const item of items) runtime.pending.set(item, pending);
+
+      runtime.lastPending = pending;
+    }
 
     return items;
   },

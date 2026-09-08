@@ -4,8 +4,7 @@ import { emptyCache } from "./cache";
 import { registerCommands } from "./commands";
 import { trackChange } from "./context/recent-edits";
 import { createProvider } from "./provider";
-import { activeConfig, cancelIdleTrigger, createRuntime, noteFile, relativePath, type Runtime, scheduleIdleTrigger } from "./runtime";
-import { idleStatus, renderStatus } from "./status-bar";
+import { cancelIdleTrigger, createRuntime, noteFile, relativePath, type Runtime, scheduleIdleTrigger, showActive } from "./runtime";
 import type { Suggestion } from "./suggest";
 
 const trackDocument = (runtime: Runtime, document: vscode.TextDocument): void => {
@@ -16,18 +15,6 @@ const trackDocument = (runtime: Runtime, document: vscode.TextDocument): void =>
   if (trackChange(runtime.tracker, document.uri.toString(), path, document.getText())) {
     noteFile(runtime, path);
   }
-};
-
-const showActive = (runtime: Runtime): void => {
-  const active = activeConfig(runtime);
-
-  if (active.configuration === undefined) {
-    renderStatus(runtime.status, idleStatus(active.names, active.problems), runtime.isDev);
-
-    return;
-  }
-
-  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name, detail: "" }, runtime.isDev);
 };
 
 export const activate = (context: vscode.ExtensionContext): void => {

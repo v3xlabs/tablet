@@ -1,3 +1,4 @@
+import { firstSentence } from "../format/budget";
 import { type AssembledPrompt } from "../format/fim";
 import { render } from "../format/template";
 
@@ -13,7 +14,7 @@ export const describeDiagnostic = (diagnostic: Diagnostic): string => {
   const where = `${diagnostic.line + 1}:${diagnostic.character + 1}`;
   const who = diagnostic.source === undefined ? diagnostic.severity : `${diagnostic.severity} ${diagnostic.source}`;
 
-  return `${where} ${who}: ${diagnostic.message}`;
+  return `${where} ${who}: ${firstSentence(diagnostic.message)}`;
 };
 
 /**

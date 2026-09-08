@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { emptyCache } from "../src/cache";
 import { parseConfigurations } from "../src/config";
+import { focusLine } from "../src/context/recent-files";
 import type { CompletionResult } from "../src/endpoint";
 import type { Snapshot } from "../src/snapshot";
-import { focusLine, suggest, type Suggestion } from "../src/suggest";
+import { suggest, type Suggestion } from "../src/suggest";
 
 const config = (raw: Record<string, unknown>) => {
   const parsed = parseConfigurations({ one: raw });
@@ -47,6 +48,7 @@ const dependencies = (answers: CompletionResult[], files: Record<string, string[
 
 const input = (overrides: Partial<Parameters<typeof suggest>[0]>) => ({
   configuration: fim,
+  budget: 6000,
   snapshot,
   chunks: [],
   changes: [],
@@ -144,7 +146,7 @@ describe("suggest, next edit", () => {
     const result = await suggest(input({
       configuration: nextEdit,
       snapshot: emptied,
-      changes: [{ path: "src/test.ts", before: "const a = 1;\n\n", after: "const a = 1;" }],
+      changes: [{ path: "src/test.ts", line: 0, before: "const a = 1;\n\n", after: "const a = 1;" }],
     }), d);
 
     expect(result).toEqual({
@@ -174,7 +176,7 @@ describe("suggest, next edit", () => {
         configuration: nextEdit,
         snapshot: editable,
         candidatePaths: ["src/greet.ts"],
-        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
       }),
       d,
     );
@@ -234,7 +236,7 @@ describe("suggest, next edit", () => {
         configuration: nextEdit,
         snapshot: editable,
         candidatePaths: ["src/greet.ts"],
-        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
         previousByPath: new Map([["src/greet.ts", ["export const greet = (u: User) => u.OLD;"]]]),
       }),
       d,
@@ -297,7 +299,7 @@ describe("suggest, asking around a diagnostic", () => {
 describe("focusLine", () => {
   it("points at the line still holding the identifier the edit removed", () => {
     const lines = ["import {User} from './user';", "", "const a = user.name;"];
-    const changes = [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }];
+    const changes = [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }];
 
     expect(focusLine(lines, changes)).toBe(2);
   });
@@ -421,7 +423,7 @@ describe("suggest, showing recent files to the model", () => {
       input({
         configuration: nextEdit,
         candidatePaths: ["src/greet.ts"],
-        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
       }),
       d,
     );
@@ -439,7 +441,7 @@ describe("suggest, showing recent files to the model", () => {
       input({
         configuration: nextEdit,
         candidatePaths: ["src/config.ts"],
-        changes: [{ path: "src/user.ts", before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
       }),
       d,
     );

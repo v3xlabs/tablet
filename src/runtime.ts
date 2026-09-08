@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
 
 import { type Cache, emptyCache } from "./cache";
+import type { CollectedRecord } from "./collect/record";
 import { type Config, isLanguageEnabled, parseConfigurations, type ParseResult, selectActive } from "./config";
 import { type ChangeTracker, emptyTracker } from "./context/recent-edits";
 import { emptyRing, type Ring } from "./context/ring-buffer";
+import { idleStatus, renderStatus, type StatusMarks } from "./status-bar";
 import type { Suggestion } from "./suggest";
 
 export const OVERRIDE_KEY = "activeConfig.override";
@@ -26,6 +28,18 @@ export type Runtime = {
   lastPickHash: string | undefined;
   inFlight: AbortController | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The context size the endpoint reported when it refused a prompt, held for the session. */
+  contextLimit: number | undefined;
+  globalStoragePath: string;
+  /** Records for suggestions on screen, settled when the editor reports how each one ended. */
+  pending: WeakMap<vscode.InlineCompletionItem, PendingRecord>;
+  lastPending: PendingRecord | undefined;
+  watcher: vscode.Disposable | undefined;
+};
+
+export type PendingRecord = {
+  record: CollectedRecord;
+  document: vscode.TextDocument;
 };
 
 export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
@@ -47,7 +61,26 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     lastPickHash: undefined,
     inFlight: undefined,
     idleTimer: undefined,
+    contextLimit: undefined,
+    globalStoragePath: context.globalStorageUri.fsPath,
+    pending: new WeakMap(),
+    lastPending: undefined,
+    watcher: undefined,
   };
+};
+
+const BUDGET_MARGIN = 0.9;
+
+/**
+ * What the endpoint told us wins over what the configuration guessed, and the generation
+ * allowance comes off either, so the prompt and the answer fit the slot together.
+ */
+export const promptBudget = (runtime: Runtime, config: Config): number => {
+  const ceiling = runtime.contextLimit === undefined
+    ? config.contextBudget
+    : Math.min(config.contextBudget, Math.floor(runtime.contextLimit * BUDGET_MARGIN));
+
+  return Math.max(0, ceiling - config.maxTokens);
 };
 
 export type Active = {
@@ -101,6 +134,28 @@ export const isAutomaticEnabled = (runtime: Runtime): boolean => {
   const setting = vscode.workspace.getConfiguration("tablet").get<boolean>("enabled") ?? true;
 
   return runtime.memento.get<boolean>(ENABLED_KEY) ?? setting;
+};
+
+/** Read against the active document, so a workspace that opted in is the one that collects. */
+export const isCollectEnabled = (): boolean =>
+  vscode.workspace.getConfiguration("tablet", vscode.window.activeTextEditor?.document.uri).get<boolean>("collect") ?? false;
+
+export const statusMarks = (runtime: Runtime): StatusMarks => ({
+  isDevelopment: runtime.isDev,
+  isPaused: !isAutomaticEnabled(runtime),
+  isCollecting: isCollectEnabled(),
+});
+
+export const showActive = (runtime: Runtime): void => {
+  const active = activeConfig(runtime);
+
+  if (active.configuration === undefined) {
+    renderStatus(runtime.status, idleStatus(active.names, active.problems), statusMarks(runtime));
+
+    return;
+  }
+
+  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name, detail: "" }, statusMarks(runtime));
 };
 
 const IDLE_TRIGGER_MS = 400;

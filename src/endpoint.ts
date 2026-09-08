@@ -2,6 +2,7 @@ export type EndpointFailure
   = | { kind: "unreachable"; detail: string; }
     | { kind: "timeout"; }
     | { kind: "aborted"; }
+    | { kind: "context"; promptTokens: number; contextSize: number; }
     | { kind: "status"; status: number; detail: string; }
     | { kind: "malformed"; url: string; detail: string; }
     | { kind: "native-api"; url: string; };
@@ -35,6 +36,9 @@ export const describeFailure = (failure: EndpointFailure): string => {
     case "aborted": {
       return "cancelled";
     }
+    case "context": {
+      return `the prompt was ${failure.promptTokens} tokens and the endpoint holds ${failure.contextSize}`;
+    }
     case "status": {
       return `the endpoint answered ${failure.status}: ${failure.detail}`;
     }
@@ -54,6 +58,33 @@ const readBody = async (response: Response): Promise<string> => {
   catch {
     return "";
   }
+};
+
+/**
+ * llama.cpp refuses a prompt over its slot with a 400 that names both sizes. Reading
+ * them is what lets the next request fit instead of failing the same way.
+ */
+export const readContextOverflow = (body: string): EndpointFailure | undefined => {
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(body);
+  }
+  catch {
+    return undefined;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+
+  const error = (parsed as { error?: unknown; }).error;
+
+  if (typeof error !== "object" || error === null) return undefined;
+
+  const { type, n_prompt_tokens: promptTokens, n_ctx: contextSize } = error as { type?: unknown; n_prompt_tokens?: unknown; n_ctx?: unknown; };
+
+  if (type !== "exceed_context_size_error" || typeof promptTokens !== "number" || typeof contextSize !== "number") return undefined;
+
+  return { kind: "context", promptTokens, contextSize };
 };
 
 export type BodyRead
@@ -129,6 +160,9 @@ export const complete = async (request: CompletionRequest): Promise<CompletionRe
 
   if (!response.ok) {
     const detail = await readBody(response);
+    const overflow = readContextOverflow(detail);
+
+    if (overflow !== undefined) return { ok: false, failure: overflow };
 
     return { ok: false, failure: { kind: "status", status: response.status, detail: detail.slice(0, 400) } };
   }

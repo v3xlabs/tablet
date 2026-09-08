@@ -40,6 +40,13 @@ describe("chunksAround", () => {
     const lines = Array.from({ length: 200 }, (_unused, index) => `line ${index}`);
     const picked = chunksAround("a.ts", lines, 100, 50, 10);
 
-    expect(picked.map(held => held.startLine)).toEqual([50, 150]);
+    expect(picked.map(held => [held.startLine, held.startLine + held.lines.length])).toEqual([[40, 50], [150, 160]]);
+  });
+
+  it("finds material in a file shorter than the scope", () => {
+    const lines = Array.from({ length: 120 }, (_unused, index) => `line ${index}`);
+    const picked = chunksAround("a.ts", lines, 60, 40, 10);
+
+    expect(picked.map(held => held.startLine)).toEqual([10, 100]);
   });
 });

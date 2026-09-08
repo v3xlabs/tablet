@@ -1,6 +1,7 @@
 import { type Diagnostic, renderDiagnostics } from "../context/diagnostics";
 import type { RecentEdit } from "../context/recent-edits";
 import type { Chunk } from "../context/ring-buffer";
+import { clipHunk, clipLine, fitToBudget } from "./budget";
 import { type AssembledPrompt, renderChunks } from "./fim";
 import { render } from "./template";
 import { splitIntoEdits, type WindowEdit } from "./window-diff";
@@ -47,6 +48,9 @@ export const NEXT_EDIT_DEFAULTS = {
   contextLines: 300,
   crossFileCandidates: 2,
   contextFiles: 2,
+  // the shared llama.cpp slot is 8192, and this leaves room for maxTokens plus the
+  // estimate's own error
+  contextBudget: 7000,
 };
 
 export type EditTarget = {
@@ -67,6 +71,7 @@ export type NextEditInput = {
   cursorMarker: string;
   formatMarker: string;
   contextLines: number;
+  budget: number;
   target: EditTarget;
   chunks: Chunk[];
   changes: RecentEdit[];
@@ -131,12 +136,18 @@ const changeAnalysis = (changes: RecentEdit[]): string => {
   return lines.length === 0 ? "" : `<|file_sep|>analysis\n${lines.join("\n")}\n`;
 };
 
+const HUNK_LINE_LIMIT = 12;
+
 const renderChanges = (changeTemplate: string, changes: RecentEdit[]): AssembledPrompt => {
   const unknown = new Set<string>();
   const parts: string[] = [];
 
   for (const change of changes) {
-    const result = render(changeTemplate, { path: change.path, before: change.before, after: change.after });
+    const result = render(changeTemplate, {
+      path: change.path,
+      before: clipHunk(change.before, HUNK_LINE_LIMIT),
+      after: clipHunk(change.after, HUNK_LINE_LIMIT),
+    });
 
     if (result.ok) parts.push(result.text);
     else for (const name of result.unknown) unknown.add(name);
@@ -163,22 +174,59 @@ const renderFormatInstruction = (template: string, marker: string): AssembledPro
   return result.ok ? { ok: true, prompt: result.text } : { ok: false, unknown: result.unknown };
 };
 
-export const assembleNextEdit = (input: NextEditInput): AssembledPrompt => {
+type Sections = {
+  contextLines: number;
+  chunks: Chunk[];
+  changes: RecentEdit[];
+  near: Diagnostic[];
+  far: Diagnostic[];
+};
+
+const CONTEXT_SHRINK = 0.75;
+
+const withoutFarthest = (diagnostics: Diagnostic[], anchor: number): Diagnostic[] | undefined => {
+  if (diagnostics.length === 0) return undefined;
+
+  const farthest = diagnostics.reduce((held, entry) =>
+    (Math.abs(entry.line - anchor) > Math.abs(held.line - anchor) ? entry : held));
+
+  return diagnostics.filter(entry => entry !== farthest);
+};
+
+/**
+ * What leaves first is what the model needs least: a cross file chunk, then a diagnostic
+ * away from the window, then the file excerpt shrinking toward the window, then the
+ * oldest change, and last a diagnostic on the window itself. The windows never shrink,
+ * because the edit has to land in text the model saw whole.
+ */
+const trimSteps = (windowLines: number, anchor: number): Array<(held: Sections) => Sections | undefined> => [
+  held => (held.chunks.length > 0 ? { ...held, chunks: held.chunks.slice(1) } : undefined),
+  (held) => {
+    const far = withoutFarthest(held.far, anchor);
+
+    return far === undefined ? undefined : { ...held, far };
+  },
+  (held) => {
+    if (held.contextLines <= windowLines) return;
+
+    return { ...held, contextLines: Math.max(windowLines, Math.floor(held.contextLines * CONTEXT_SHRINK)) };
+  },
+  held => (held.changes.length > 0 ? { ...held, changes: held.changes.slice(1) } : undefined),
+  (held) => {
+    const near = withoutFarthest(held.near, anchor);
+
+    return near === undefined ? undefined : { ...held, near };
+  },
+];
+
+export type AssembledNextEdit
+  = | { ok: true; prompt: string; tokens: number; }
+    | { ok: false; unknown: string[]; };
+
+export const assembleNextEdit = (input: NextEditInput): AssembledNextEdit => {
   const { target } = input;
-  const fileStart = Math.max(0, target.windowStart - Math.floor(input.contextLines / 2));
-  const fileEnd = Math.min(target.lines.length, fileStart + input.contextLines);
-
-  const context = renderChunks(input.chunkTemplate, input.chunks);
-
-  if (!context.ok) return context;
-
-  const changes = renderChanges(input.changeTemplate, input.changes);
-
-  if (!changes.ok) return changes;
-
-  const diagnostics = renderDiagnostics(input.diagnosticTemplate, target.path, input.diagnostics);
-
-  if (!diagnostics.ok) return diagnostics;
+  const windowLines = target.windowEnd - target.windowStart;
+  const anchor = target.cursor?.line ?? Math.floor((target.windowStart + target.windowEnd) / 2);
 
   const instruction = renderFormatInstruction(input.formatTemplate, input.formatMarker);
 
@@ -186,13 +234,8 @@ export const assembleNextEdit = (input: NextEditInput): AssembledPrompt => {
 
   const current = withCursor(target, input.cursorMarker);
   const prefillEnd = target.cursor === undefined ? 0 : target.cursor.line - target.windowStart + 1;
-
-  const result = render(input.template, {
+  const fixed = {
     path: target.path,
-    file: target.lines.slice(fileStart, fileEnd).join("\n"),
-    context: context.prompt,
-    changes: changes.prompt,
-    diagnostics: diagnostics.prompt,
     original: (target.previousWindow ?? windowOf(target)).join("\n"),
     current: current.join("\n"),
     prefill: windowOf(target).slice(0, prefillEnd)
@@ -200,9 +243,51 @@ export const assembleNextEdit = (input: NextEditInput): AssembledPrompt => {
     format: instruction.prompt,
     start: String(target.windowStart + 1),
     end: String(target.windowEnd),
-  });
+  };
 
-  return result.ok ? { ok: true, prompt: result.text } : { ok: false, unknown: result.unknown };
+  const unknown = new Set<string>();
+
+  const renderSections = (sections: Sections): string => {
+    const fileStart = Math.max(0, target.windowStart - Math.floor((sections.contextLines - windowLines) / 2));
+    const fileEnd = Math.min(target.lines.length, fileStart + sections.contextLines);
+
+    const context = renderChunks(input.chunkTemplate, sections.chunks.map(chunk => ({ ...chunk, lines: chunk.lines.map(clipLine) })));
+    const changes = renderChanges(input.changeTemplate, sections.changes);
+    const diagnostics = renderDiagnostics(input.diagnosticTemplate, target.path, [...sections.near, ...sections.far].toSorted((left, right) => left.line - right.line));
+
+    for (const part of [context, changes, diagnostics]) {
+      if (!part.ok) for (const name of part.unknown) unknown.add(name);
+    }
+
+    const result = render(input.template, {
+      ...fixed,
+      file: target.lines.slice(fileStart, fileEnd).map(clipLine)
+        .join("\n"),
+      context: context.ok ? context.prompt : "",
+      changes: changes.ok ? changes.prompt : "",
+      diagnostics: diagnostics.ok ? diagnostics.prompt : "",
+    });
+
+    if (!result.ok) for (const name of result.unknown) unknown.add(name);
+
+    return result.ok ? result.text : "";
+  };
+
+  const isNear = (entry: Diagnostic): boolean => entry.line >= target.windowStart && entry.line < target.windowEnd;
+
+  const fitted = fitToBudget(
+    {
+      contextLines: Math.max(windowLines, input.contextLines),
+      chunks: input.chunks,
+      changes: input.changes,
+      near: input.diagnostics.filter(isNear),
+      far: input.diagnostics.filter(entry => !isNear(entry)),
+    },
+    input.budget,
+    { render: renderSections, steps: trimSteps(windowLines, anchor) },
+  );
+
+  return unknown.size > 0 ? { ok: false, unknown: [...unknown] } : { ok: true, prompt: fitted.prompt, tokens: fitted.tokens };
 };
 
 const HEADER = /^\S+:\d+:\d+$/;

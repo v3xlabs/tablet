@@ -1,15 +1,16 @@
+import { askZeta } from "./ask-zeta";
 import { type Cache, readCache, writeCache } from "./cache";
 import type { Config as Config } from "./config";
 import type { Diagnostic } from "./context/diagnostics";
 import type { RecentEdit } from "./context/recent-edits";
+import { focusLine, recentFileChunks } from "./context/recent-files";
 import type { Chunk } from "./context/ring-buffer";
 import { isSecretPath, redactSecrets } from "./context/sanitize";
 import type { CompletionResult, EndpointFailure } from "./endpoint";
 import { assembleFim } from "./format/fim";
 import { filterCompletion } from "./format/fim-filter";
 import { assembleNextEdit, type EditTarget, readNextEdit } from "./format/next-edit";
-import { renameSpreadFor } from "./format/rename";
-import { whitespaceRepairFor } from "./format/whitespace";
+import { derivedRepairs, modelFirst, orderedByRelevance, uniqueBy } from "./rank";
 import { lineSuffixOf, type Snapshot, windowAround } from "./snapshot";
 
 export type Suggestion
@@ -26,6 +27,8 @@ export type SuggestDependencies = {
 
 export type SuggestInput = {
   configuration: Config;
+  /** Tokens the whole prompt may hold, with the generation allowance already taken off. */
+  budget: number;
   snapshot: Snapshot;
   chunks: Chunk[];
   changes: RecentEdit[];
@@ -40,46 +43,6 @@ export type SuggestResult
     | { kind: "none"; reason: string; }
     | { kind: "failure"; failure: EndpointFailure; }
     | { kind: "invalid"; unknown: string[]; };
-
-const WORD = /[A-Za-z_$][\w$]*/g;
-
-const wordsIn = (text: string): Set<string> => new Set(text.match(WORD));
-
-/**
- * A rename leaves the old identifier behind in every file that has not caught up yet, so
- * the line holding it is the place worth showing the model in a file the cursor is not in.
- */
-export const focusLine = (lines: string[], changes: RecentEdit[]): number => {
-  const removed = new Set<string>();
-
-  for (const change of changes) {
-    const after = wordsIn(change.after);
-
-    for (const word of wordsIn(change.before)) {
-      if (!after.has(word)) removed.add(word);
-    }
-  }
-
-  if (removed.size === 0) return 0;
-
-  const hit = lines.findIndex(line => [...wordsIn(line)].some(word => removed.has(word)));
-
-  return hit === -1 ? 0 : hit;
-};
-
-const uniqueBy = <T>(items: T[], key: (item: T) => string): T[] => {
-  const seen = new Set<string>();
-
-  return items.filter((item) => {
-    const signature = key(item);
-
-    if (seen.has(signature)) return false;
-
-    seen.add(signature);
-
-    return true;
-  });
-};
 
 const localTarget = (input: SuggestInput, windowLines: number): EditTarget => {
   const { snapshot } = input;
@@ -125,24 +88,6 @@ const editsFrom = (texts: string[], target: EditTarget, formatMarker: string, cu
   return uniqueBy(edits, edit => JSON.stringify(edit));
 };
 
-/**
- * What the linter flags is what the reader wants fixed, and after that the
- * fix nearest the cursor beats a stray change the model made further away.
- */
-const orderedByRelevance = (suggestions: Suggestion[], target: EditTarget, diagnostics: Diagnostic[]): Suggestion[] => {
-  const anchor = target.cursor?.line ?? Math.floor((target.windowStart + target.windowEnd) / 2);
-
-  const rank = (suggestion: Suggestion): number => {
-    if (suggestion.kind !== "edit") return 0;
-
-    const isFlagged = diagnostics.some(held => held.line >= suggestion.startLine && held.line <= suggestion.endLine);
-
-    return (isFlagged ? 0 : 1000) + Math.abs(suggestion.startLine - anchor);
-  };
-
-  return suggestions.toSorted((left, right) => rank(left) - rank(right));
-};
-
 const askFim = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
   const { configuration: config, snapshot } = input;
 
@@ -153,6 +98,7 @@ const askFim = async (input: SuggestInput, dependencies: SuggestDependencies): P
     chunkTemplate: config.chunkTemplate,
     prefixLines: config.prefixLines,
     suffixLines: config.suffixLines,
+    budget: input.budget,
     snapshot,
     chunks: input.chunks,
     repo: input.repo,
@@ -196,15 +142,7 @@ const askNextEditFor = async (
   if (config.format !== "next-edit") return { kind: "none", reason: "the active configuration is for the other format" };
 
   const diagnostics = target.path === input.snapshot.path ? input.diagnostics : dependencies.diagnosticsFor(target.path);
-  const repair = whitespaceRepairFor(target, diagnostics);
-  const derived = uniqueBy([...renameSpreadFor(target, input.changes), ...repair.edits], item => JSON.stringify(item));
-  const cursorLine = target.cursor?.line;
-
-  // a repair the extension worked out for itself, on the very line the reader is on, is
-  // not worth a round trip: the answer is already in hand before the request would return
-  if (cursorLine !== undefined && derived.some(edit => edit.kind === "edit" && edit.startLine === cursorLine)) {
-    return { kind: "suggestions", suggestions: orderedByRelevance(derived, target, diagnostics) };
-  }
+  const derived = derivedRepairs(target, input.changes, diagnostics);
 
   const assembled = assembleNextEdit({
     template: config.template,
@@ -215,6 +153,7 @@ const askNextEditFor = async (
     cursorMarker: config.cursorMarker,
     formatMarker: config.formatMarker,
     contextLines: config.contextLines,
+    budget: input.budget,
     target,
     chunks: input.chunks.filter(chunk => chunk.path !== target.path),
     changes: input.changes,
@@ -236,9 +175,9 @@ const askNextEditFor = async (
   // the formatter is the last thing offered, never the first: it rewrites the whole file,
   // so anything more precise, from the model or from the window, outranks it
   const withoutModel = (): SuggestResult | undefined => {
-    if (derived.length > 0) return { kind: "suggestions", suggestions: orderedByRelevance(derived, target, diagnostics) };
+    if (derived.edits.length > 0) return { kind: "suggestions", suggestions: derived.edits };
 
-    return repair.requiresFormatter ? { kind: "suggestions", suggestions: [{ kind: "format", path: target.path }] } : undefined;
+    return derived.requiresFormatter ? { kind: "suggestions", suggestions: [{ kind: "format", path: target.path }] } : undefined;
   };
 
   if (!answer.ok) return withoutModel() ?? { kind: "failure", failure: answer.failure };
@@ -251,8 +190,7 @@ const askNextEditFor = async (
     if (fallback !== undefined) return fallback;
   }
 
-  const combined = uniqueBy([...derived, ...modelEdits], item => JSON.stringify(item));
-  const suggestions = orderedByRelevance(combined, target, diagnostics);
+  const suggestions = modelFirst(modelEdits, derived.edits, target, diagnostics);
 
   writeCache(dependencies.cache, assembled.prompt, suggestions);
 
@@ -329,38 +267,6 @@ const diagnosticTarget = (input: SuggestInput, windowLines: number): EditTarget 
   };
 };
 
-/**
- * Renaming something in one file and moving to another leaves the model with a change it
- * can see and a file it cannot. A window of each recently touched file, taken around the
- * identifier the change removed, is the smallest thing that closes that gap.
- */
-const recentFileChunks = async (
-  input: SuggestInput,
-  dependencies: SuggestDependencies,
-  budget: number,
-  span: number,
-): Promise<Chunk[]> => {
-  const paths = input.candidatePaths
-    .filter(path => path !== input.snapshot.path)
-    .filter(path => !isSecretPath(path))
-    .slice(0, Math.max(0, budget));
-
-  const reads = await Promise.all(paths.map(path => dependencies.readFile(path)));
-  const chunks: Chunk[] = [];
-
-  for (const [index, read] of reads.entries()) {
-    if (read === undefined) continue;
-
-    const path = paths[index] ?? "";
-    const lines = read.map(line => redactSecrets(line));
-    const around = windowAround(lines.length, focusLine(lines, input.changes), span);
-
-    chunks.push({ path, startLine: around.start, lines: lines.slice(around.start, around.end) });
-  }
-
-  return chunks;
-};
-
 const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
   const { configuration: config } = input;
 
@@ -431,5 +337,15 @@ export const suggest = async (input: SuggestInput, dependencies: SuggestDependen
   // the suggestion a secret should never get
   if (isSecretPath(input.snapshot.path)) return { kind: "none", reason: "the file holds secrets, so nothing was sent" };
 
-  return input.configuration.format === "fim" ? askFim(input, dependencies) : askNextEdit(input, dependencies);
+  switch (input.configuration.format) {
+    case "fim": {
+      return askFim(input, dependencies);
+    }
+    case "next-edit": {
+      return askNextEdit(input, dependencies);
+    }
+    case "zeta": {
+      return askZeta(input, dependencies);
+    }
+  }
 };

@@ -51,7 +51,15 @@ pnpm bench -- --no-diagnostics # measure what the diagnostics contribute
 pnpm bench -- --no-format-marker # drop the formatter instruction from the prompt
 pnpm bench -- --samples 3 --temperature 0.2 # run every case three times, report per-sample and any-sample
 pnpm bench -- --windowLines 31 --contextLines 100 --endpoint http://127.0.0.1:8080/v1 --model m
+pnpm bench -- --format zeta --endpoint https://host/upstream/zeta-2.1/v1 --model zeta-2.1 # the zeta 2.1 layout
+pnpm bench -- --budget 4096 # fail a case offline when its estimated prompt would not fit
 ```
+
+`--budget` is the token budget the extension trims to, prompt and generation together,
+default 7000. A prompt that still estimates over it is reported as an `error` without a
+request, so a trimming regression shows up before an endpoint does. A case folder whose
+fixture is missing on disk is reported under the `fixture` category instead of stopping
+the run; `pnpm bench:generate` restores it.
 
 Scoring: the first suggestion is applied to the file it names, then the case is asked
 again on the changed text, up to three rounds, the way a reader tabs through successive

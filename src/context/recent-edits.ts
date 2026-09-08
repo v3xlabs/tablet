@@ -2,6 +2,8 @@ import { reduceToEdit } from "../format/window-diff";
 
 export type RecentEdit = {
   path: string;
+  /** Document line the before block starts on, zero based. */
+  line: number;
   before: string;
   after: string;
 };
@@ -37,7 +39,7 @@ export const recordEdit = (log: EditLog, edit: RecentEdit): EditLog => {
   const last = log.edits[log.edits.length - 1];
 
   const edits = last !== undefined && isSameBurst(log, edit)
-    ? [...log.edits.slice(0, -1), { path: edit.path, before: last.before, after: edit.after }]
+    ? [...log.edits.slice(0, -1), { path: edit.path, line: last.line, before: last.before, after: edit.after }]
     : [...log.edits, edit];
 
   const settled = edits.filter(entry => entry.before !== entry.after);
@@ -53,7 +55,7 @@ export const blocksFromChange = (
   before: string[],
   after: string[],
   pad: number,
-): { before: string; after: string; } | undefined => {
+): { line: number; before: string; after: string; } | undefined => {
   const edit = reduceToEdit(before, after, 0);
 
   if (edit === undefined) return undefined;
@@ -62,6 +64,7 @@ export const blocksFromChange = (
   const afterEnd = edit.text === "" ? edit.startLine + 1 : edit.startLine + edit.text.split("\n").length;
 
   return {
+    line: start,
     before: before.slice(start, Math.min(before.length, edit.endLine + 1 + pad)).join("\n"),
     after: after.slice(start, Math.min(after.length, afterEnd + pad)).join("\n"),
   };
@@ -101,7 +104,7 @@ export const trackChange = (tracker: ChangeTracker, key: string, path: string, n
 
   if (blocks === undefined) return undefined;
 
-  const change = { path, before: blocks.before, after: blocks.after };
+  const change = { path, line: blocks.line, before: blocks.before, after: blocks.after };
 
   if (!isSameBurst(tracker.log, change) || !tracker.previousByPath.has(path)) {
     tracker.previousByPath.delete(path);
