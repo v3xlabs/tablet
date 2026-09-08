@@ -215,7 +215,7 @@ describe("zeta configuration", () => {
 
 describe("assembleZeta, accepted predictions in the history", () => {
   it("marks an accepted prediction the way zed does", () => {
-    const assembled = assembleZeta({ ...base, changes: [{ ...base.changes[0], isPredicted: true }] });
+    const assembled = assembleZeta({ ...base, changes: base.changes.map(change => ({ ...change, isPredicted: true })) });
 
     expect(assembled.ok && assembled.prompt).toContain("<filename>edit_history\n// User accepted prediction:\n--- a/src/cart.py");
   });
