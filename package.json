@@ -144,6 +144,17 @@
           ],
           "markdownDescription": "Language identifiers treated as prose. In a prose document a `next-edit` configuration asks with a smaller window, a small token budget, no formatter offer, and no cross file lookup, so the answer is a few words or one precise edit instead of a rewritten paragraph."
         },
+        "tablet.eagerness": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "low",
+            "medium",
+            "high"
+          ],
+          "default": "auto",
+          "markdownDescription": "How soon tablet asks after you pause. `auto` follows how the last twenty suggestions went: mostly accepted shortens the delays by half, mostly rejected or typed over stretches them threefold. `#tablet.debounceMs#` and `#tablet.idleTriggerMs#` are the base values."
+        },
         "tablet.debounceMs": {
           "type": "number",
           "default": 150,

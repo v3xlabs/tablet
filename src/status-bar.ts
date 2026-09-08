@@ -11,6 +11,7 @@ export type StatusMarks = {
   isDevelopment: boolean;
   isPaused: boolean;
   isCollecting: boolean;
+  eagerness: "low" | "medium" | "high";
 };
 
 export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, marks: StatusMarks): void => {
@@ -57,7 +58,7 @@ export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, mar
     item.tooltip = `${item.tooltip ?? ""}\ncollecting records locally`;
   }
 
-  if (marks.isPaused) item.tooltip = `${item.tooltip ?? ""}\nautomatic suggestions are paused`;
+  item.tooltip = marks.isPaused ? `${item.tooltip ?? ""}\nautomatic suggestions are paused` : `${item.tooltip ?? ""}\neagerness ${marks.eagerness}`;
 
   // the dev host and the installed copy render the same name, so the build the reader
   // is looking at is only ever told apart here

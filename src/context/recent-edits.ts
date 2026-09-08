@@ -4,6 +4,8 @@ export type RecentEdit = {
   path: string;
   /** Document line the before block starts on, zero based. */
   line: number;
+  /** The change came from accepting a tablet suggestion, which the model is told. */
+  isPredicted: boolean;
   before: string;
   after: string;
 };
@@ -39,7 +41,7 @@ export const recordEdit = (log: EditLog, edit: RecentEdit): EditLog => {
   const last = log.edits[log.edits.length - 1];
 
   const edits = last !== undefined && isSameBurst(log, edit)
-    ? [...log.edits.slice(0, -1), { path: edit.path, line: last.line, before: last.before, after: edit.after }]
+    ? [...log.edits.slice(0, -1), { path: edit.path, line: last.line, isPredicted: last.isPredicted || edit.isPredicted, before: last.before, after: edit.after }]
     : [...log.edits, edit];
 
   const settled = edits.filter(entry => entry.before !== entry.after);
@@ -77,13 +79,37 @@ export type ChangeTracker = {
   lastText: Map<string, string>;
   previousByPath: Map<string, string[]>;
   log: EditLog;
+  /** An accept the editor reported before its document change arrived. */
+  expected: { path: string; text: string; } | undefined;
 };
 
 export const emptyTracker = (limit: number): ChangeTracker => ({
   lastText: new Map(),
   previousByPath: new Map(),
   log: emptyEditLog(limit),
+  expected: undefined,
 });
+
+const didMarkLast = (tracker: ChangeTracker, path: string, text: string): boolean => {
+  const last = tracker.log.edits[tracker.log.edits.length - 1];
+
+  if (last === undefined || last.path !== path || !last.after.includes(text)) return false;
+
+  tracker.log = { ...tracker.log, edits: [...tracker.log.edits.slice(0, -1), { ...last, isPredicted: true }] };
+
+  return true;
+};
+
+/**
+ * The editor reports an accept and the document change in an order it does not promise,
+ * so the mark goes on the last recorded edit when the text is already there, and waits
+ * for the change otherwise.
+ */
+export const notePrediction = (tracker: ChangeTracker, path: string, text: string): void => {
+  if (text === "" || didMarkLast(tracker, path, text)) return;
+
+  tracker.expected = { path, text };
+};
 
 /**
  * The live tracking rule, shared by the extension and the bench: diff the new text
@@ -104,7 +130,7 @@ export const trackChange = (tracker: ChangeTracker, key: string, path: string, n
 
   if (blocks === undefined) return undefined;
 
-  const change = { path, line: blocks.line, before: blocks.before, after: blocks.after };
+  const change = { path, line: blocks.line, isPredicted: false, before: blocks.before, after: blocks.after };
 
   if (!isSameBurst(tracker.log, change) || !tracker.previousByPath.has(path)) {
     tracker.previousByPath.delete(path);
@@ -118,6 +144,10 @@ export const trackChange = (tracker: ChangeTracker, key: string, path: string, n
   }
 
   tracker.log = recordEdit(tracker.log, change);
+
+  const expected = tracker.expected;
+
+  if (expected !== undefined && expected.path === path && didMarkLast(tracker, path, expected.text)) tracker.expected = undefined;
 
   return change;
 };

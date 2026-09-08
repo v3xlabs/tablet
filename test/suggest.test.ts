@@ -146,7 +146,7 @@ describe("suggest, next edit", () => {
     const result = await suggest(input({
       configuration: nextEdit,
       snapshot: emptied,
-      changes: [{ path: "src/test.ts", line: 0, before: "const a = 1;\n\n", after: "const a = 1;" }],
+      changes: [{ path: "src/test.ts", line: 0, isPredicted: false, before: "const a = 1;\n\n", after: "const a = 1;" }],
     }), d);
 
     expect(result).toEqual({
@@ -176,7 +176,7 @@ describe("suggest, next edit", () => {
         configuration: nextEdit,
         snapshot: editable,
         candidatePaths: ["src/greet.ts"],
-        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, isPredicted: false, before: "  name: string;", after: "  displayName: string;" }],
       }),
       d,
     );
@@ -236,7 +236,7 @@ describe("suggest, next edit", () => {
         configuration: nextEdit,
         snapshot: editable,
         candidatePaths: ["src/greet.ts"],
-        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, isPredicted: false, before: "  name: string;", after: "  displayName: string;" }],
         previousByPath: new Map([["src/greet.ts", ["export const greet = (u: User) => u.OLD;"]]]),
       }),
       d,
@@ -299,7 +299,7 @@ describe("suggest, asking around a diagnostic", () => {
 describe("focusLine", () => {
   it("points at the line still holding the identifier the edit removed", () => {
     const lines = ["import {User} from './user';", "", "const a = user.name;"];
-    const changes = [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }];
+    const changes = [{ path: "src/user.ts", line: 0, isPredicted: false, before: "  name: string;", after: "  displayName: string;" }];
 
     expect(focusLine(lines, changes)).toBe(2);
   });
@@ -423,7 +423,7 @@ describe("suggest, showing recent files to the model", () => {
       input({
         configuration: nextEdit,
         candidatePaths: ["src/greet.ts"],
-        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, isPredicted: false, before: "  name: string;", after: "  displayName: string;" }],
       }),
       d,
     );
@@ -441,12 +441,41 @@ describe("suggest, showing recent files to the model", () => {
       input({
         configuration: nextEdit,
         candidatePaths: ["src/config.ts"],
-        changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
+        changes: [{ path: "src/user.ts", line: 0, isPredicted: false, before: "  name: string;", after: "  displayName: string;" }],
       }),
       d,
     );
 
     expect(prompts[0]).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789AB");
     expect(prompts[0]).toContain("<redacted>");
+  });
+});
+
+describe("suggest, zeta at a flagged line", () => {
+  const zeta = config({ endpoint: "http://x/v1", model: "m", format: "zeta", windowLines: 5, contextFiles: 0 });
+
+  const far: Snapshot = {
+    path: "src/far.ts",
+    languageId: "typescript",
+    lines: Array.from({ length: 40 }, (_unused, index) => (index === 30 ? "const broken = ;" : `const line${index} = ${index};`)),
+    cursorLine: 2,
+    cursorCharacter: 0,
+  };
+
+  it("asks again with the cursor on the diagnostic when the cursor window comes back unchanged", async () => {
+    const unchanged = { ok: true as const, texts: ["<|marker_1|><|marker_1|>"] };
+    const fixed = { ok: true as const, texts: ["<|marker_1|>const line28 = 28;\nconst line29 = 29;\nconst broken = 0;\nconst line31 = 31;\nconst line32 = 32;\n<|marker_2|>"] };
+    const { deps: d, prompts } = dependencies([unchanged, fixed]);
+    const result = await suggest(
+      input({ configuration: zeta, snapshot: far, diagnostics: [{ line: 30, character: 15, severity: "error", source: "ts", message: "Expression expected." }] }),
+      d,
+    );
+
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("const broken = <|user_cursor|>;");
+    expect(result).toEqual({
+      kind: "suggestions",
+      suggestions: [{ kind: "edit", path: "src/far.ts", startLine: 30, startCharacter: 15, endLine: 30, endCharacter: 15, text: "0" }],
+    });
   });
 });

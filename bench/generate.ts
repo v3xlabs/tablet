@@ -357,6 +357,7 @@ const staleProfile = profileLines.map(line => line.replaceAll("user.displayName"
 const renameEdit: RecentEdit = {
   path: "src/user.ts",
   line: 0,
+  isPredicted: false,
   before: "export type User = {\n  id: string;\n  name: string;\n  email: string;\n};",
   after: "export type User = {\n  id: string;\n  displayName: string;\n  email: string;\n};",
 };

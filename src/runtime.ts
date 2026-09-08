@@ -5,6 +5,7 @@ import type { CollectedRecord } from "./collect/record";
 import { type Config, isLanguageEnabled, parseConfigurations, type ParseResult, selectActive } from "./config";
 import { type ChangeTracker, emptyTracker } from "./context/recent-edits";
 import { emptyRing, type Ring } from "./context/ring-buffer";
+import { delayFactor, type Eagerness, type EagernessSetting, levelOf } from "./eagerness";
 import { idleStatus, renderStatus, type StatusMarks } from "./status-bar";
 import type { Suggestion } from "./suggest";
 
@@ -35,6 +36,8 @@ export type Runtime = {
   pending: WeakMap<vscode.InlineCompletionItem, PendingRecord>;
   lastPending: PendingRecord | undefined;
   watcher: vscode.Disposable | undefined;
+  /** Scores of recent suggestion outcomes, newest last, which set the eagerness. */
+  scores: number[];
 };
 
 export type PendingRecord = {
@@ -66,6 +69,7 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     pending: new WeakMap(),
     lastPending: undefined,
     watcher: undefined,
+    scores: [],
   };
 };
 
@@ -140,10 +144,17 @@ export const isAutomaticEnabled = (runtime: Runtime): boolean => {
 export const isCollectEnabled = (): boolean =>
   vscode.workspace.getConfiguration("tablet", vscode.window.activeTextEditor?.document.uri).get<boolean>("collect") ?? false;
 
+export const eagernessOf = (runtime: Runtime): Eagerness =>
+  levelOf(runtime.scores, vscode.workspace.getConfiguration("tablet").get<EagernessSetting>("eagerness") ?? "auto");
+
+/** A configured delay, stretched or shortened by how the recent suggestions went. */
+export const scaledDelay = (runtime: Runtime, ms: number): number => Math.round(ms * delayFactor(eagernessOf(runtime)));
+
 export const statusMarks = (runtime: Runtime): StatusMarks => ({
   isDevelopment: runtime.isDev,
   isPaused: !isAutomaticEnabled(runtime),
   isCollecting: isCollectEnabled(),
+  eagerness: eagernessOf(runtime),
 });
 
 export const showActive = (runtime: Runtime): void => {
@@ -184,7 +195,7 @@ export const scheduleIdleTrigger = (runtime: Runtime, editor: vscode.TextEditor 
 
   runtime.idleTimer = setTimeout(
     () => void vscode.commands.executeCommand("editor.action.inlineSuggest.trigger"),
-    idleMs,
+    scaledDelay(runtime, idleMs),
   );
 };
 

@@ -49,6 +49,38 @@ const modelText = (record: CollectedRecord): string | undefined => {
 const events = (record: CollectedRecord): string =>
   record.events.map(event => `User edited "${event.path}":\n\n\`\`\`diff\n${unifiedHunk(event)}\n\`\`\``).join("\n\n");
 
+/**
+ * The editor calls a suggestion ignored when typing ran past it, which is agreement as
+ * often as not. Comparing what the reader typed with what was proposed tells the two
+ * apart: the same text is typed through, the same start is partial, anything else is
+ * a preference pair.
+ */
+const agreementOf = (record: CollectedRecord, proposed: string): "accepted" | "typed-through" | "partial" | "diverged" | "unchanged" => {
+  if (record.outcome.kind === "accepted") return "accepted";
+
+  if (record.resolution.kind !== "edited") return "unchanged";
+
+  const after = record.resolution.after;
+
+  if (after === proposed) return "typed-through";
+
+  // the comparison is at the line the suggestion changed, which is not always the cursor line
+  const firstEdit = record.suggestions.find(suggestion => suggestion.kind === "edit");
+  const editLine = firstEdit?.kind === "edit" ? firstEdit.startLine : record.cursor.line;
+  const offset = editLine - record.window.startLine;
+  const proposedLine = proposed.split("\n")[offset] ?? "";
+  const afterLine = after.split("\n")[offset] ?? "";
+  const originalLine = record.window.text.split("\n")[offset] ?? "";
+  const typed = afterLine.slice(originalLine.length);
+  const suggested = proposedLine.slice(originalLine.length);
+
+  if (typed.length >= 3 && suggested.startsWith(typed)) return "partial";
+
+  if (suggested.length > 0 && typed.startsWith(suggested)) return "partial";
+
+  return "diverged";
+};
+
 type ZetaRow = {
   events: string;
   input: string;
@@ -56,6 +88,7 @@ type ZetaRow = {
   rejected: string;
   assertions: string;
   tablet_outcome: string;
+  tablet_agreement: string;
   tablet_format: string;
   tablet_language: string;
   tablet_diagnostics: string;
@@ -67,7 +100,9 @@ const toRow = (record: CollectedRecord): ZetaRow | undefined => {
 
   if (proposed === undefined) return undefined;
 
-  const chosen = record.outcome.kind === "accepted"
+  const agreement = agreementOf(record, proposed);
+  const isAgreed = ["accepted", "typed-through", "partial"].includes(agreement);
+  const chosen = isAgreed
     ? proposed
     : (record.resolution.kind === "edited" ? record.resolution.after : record.window.text);
 
@@ -75,9 +110,10 @@ const toRow = (record: CollectedRecord): ZetaRow | undefined => {
     events: events(record),
     input: excerpt(record, withCursor(record)),
     output: excerpt(record, chosen),
-    rejected: record.outcome.kind === "accepted" ? "" : excerpt(record, proposed),
+    rejected: isAgreed ? "" : excerpt(record, proposed),
     assertions: "",
     tablet_outcome: record.outcome.kind,
+    tablet_agreement: agreement,
     tablet_format: record.format,
     tablet_language: record.languageId,
     tablet_diagnostics: record.diagnostics.map(entry => `${entry.line + 1}:${entry.character + 1} ${entry.severity}: ${entry.message}`).join("\n"),

@@ -226,7 +226,7 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
     lastText: new Map([...files].map(([heldPath, text]) => [heldPath, text])),
     previousByPath: new Map([...previous].map(([heldPath, text]) => [heldPath, text.split("\n")])),
     // cases written before the log carried a line have none on disk
-    log: { edits: spec.recentEdits.map(edit => ({ line: 0, ...edit })), limit: 8 },
+    log: { edits: spec.recentEdits.map(edit => ({ line: 0, isPredicted: false, ...edit })), limit: 8 },
   };
 
   let requests = 0;

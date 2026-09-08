@@ -16,7 +16,7 @@ const record: CollectedRecord = {
   format: "next-edit",
   cursor: { line: 3, character: 4 },
   window: { startLine: 0, endLine: 4, text: "const key = \"AKIAIOSFODNN7EXAMPLE\";\nconst other = 1;" },
-  events: [{ path: "src/config.ts", line: 0, before: "password = \"hunter2hunter2\"", after: "password = \"hunter2hunter3\"" }],
+  events: [{ path: "src/config.ts", line: 0, isPredicted: false, before: "password = \"hunter2hunter2\"", after: "password = \"hunter2hunter3\"" }],
   diagnostics: [],
   chunks: [{ path: "src/a.ts", startLine: 0, lines: ["ghp_abcdefghijklmnopqrstuvwxyz0123456789"] }],
   exchanges: [{ prompt: "AKIAIOSFODNN7EXAMPLE", reply: { ok: true, texts: ["AKIAIOSFODNN7EXAMPLE"] }, ms: 12 }],

@@ -300,13 +300,45 @@ Measured after the change:
 The two `env-secret-*` cases reference a `.env` fixture that the repository ignores, so
 they are missing on a fresh checkout. `pnpm bench:generate` restores them.
 
+Landed later the same day:
+
+- Model edits rank before local repairs, and no local repair answers alone. The sweep
+  corpus pays four cases for this; the reader's records showed the semicolon repair
+  answering seven times in a row while a name was being typed.
+- `info` log level, default, one line per ask.
+- The zeta path asks a second time with the cursor on the nearest diagnostic when the
+  cursor window comes back unchanged. On the 60 case slice `away` went 3 of 9 to 8 of 9,
+  overall 49 to 54.
+- The provider asks ahead as if the first suggestion were accepted, so the next answer is
+  in the cache when tab is pressed (`src/speculate.ts`).
+- `bench/export-zeta.ts` labels each row `accepted`, `typed-through`, `partial`,
+  `diverged`, or `unchanged` by comparing what was typed with what was proposed.
+- The configuration picker has a pencil per entry and an add entry.
+
+Landed in the third pass:
+
+- **Definitions from the language server.** `src/lsp.ts` asks the definition provider
+  for the names on the cursor line, nearest first, at most eight lookups within 400 ms,
+  and puts up to six excerpts of up to 12 lines into the context section after the ring
+  chunks. Definitions already on screen and files that look like secrets are skipped.
+  This applies to all three formats.
+- **Accepted predictions marked in the history.** `RecentEdit` carries `isPredicted`.
+  The provider tells the tracker on accept, the tracker marks the matching edit whichever
+  order the editor reports things in, and the zeta history writes
+  `// User accepted prediction:` above it, as zed does. The speculative ask marks its
+  own edit the same way.
+- **Eagerness from outcomes.** `src/eagerness.ts` scores accept 1, ignore 0.5, reject
+  and typed-over 0 across the last 20 suggestions. Over 0.7 halves the debounce and idle
+  delays, under 0.4 triples them. `tablet.eagerness` pins a level. The tooltip shows it.
+- **Diagnostics section for zeta, on by default.** Zed's later formats carry one; zeta
+  2.1 was trained without it. Measured on the 60 case slice: 54 to 56, both typo cases
+  now fixed, mean time 1.4 s to 1.9 s. Kept.
+
 Not done, in the order they are worth doing:
 
 1. P5 replay bench from collected records.
-2. The accepted-prediction mark in the change log, which needs the record's outcome to
-   reach the tracker.
-3. A diagnostic-centred second window for zeta, which is what sweep has and zeta lacks,
-   and what the `away` placements need.
-4. One record per served item. Today several items from one ask share one record and the
+2. Cross-file targets for zeta, the way sweep asks about candidate files.
+3. One record per served item. Today several items from one ask share one record and the
    first lifetime event settles it.
-5. P7 suppression and P8 jumps.
+4. Same-length redaction of the target window.
+5. P8 jumps.

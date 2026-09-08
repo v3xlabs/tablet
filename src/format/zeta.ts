@@ -21,9 +21,9 @@ export const ZETA_DEFAULTS = {
   template: "<[fim-suffix]>{{suffix}}\n<[fim-prefix]>{{context}}{{diagnostics}}{{history}}<filename>{{path}}\n{{prefix}}{{editable}}<[fim-middle]>",
   chunkTemplate: "<filename>{{path}}\n{{text}}\n\n",
   changeTemplate: "--- a/{{path}}\n+++ b/{{path}}\n{{diff}}\n",
-  // zeta 2.1 was not trained with a diagnostics section, so it is off until a template
-  // asks for it
-  diagnosticTemplate: "",
+  // zed's V0420 format carries a diagnostics section ahead of the related files; zeta 2.1
+  // was trained without one, and the bench decides whether it stays
+  diagnosticTemplate: "<filename>diagnostics\n{{text}}\n\n",
   cursorMarker: "<|user_cursor|>",
   stop: ["<[end▁of▁sentence]>"],
   maxTokens: 512,
@@ -36,6 +36,9 @@ export const ZETA_DEFAULTS = {
 };
 
 const MARKER = /<\|marker_(\d+)\|>/g;
+
+/** What zed writes above a history entry that came from an accepted prediction. */
+export const PREDICTED_MARK = "// User accepted prediction:\n";
 
 export const markerTag = (index: number): string => `<|marker_${index}|>`;
 
@@ -143,7 +146,7 @@ const renderHistory = (changeTemplate: string, changes: RecentEdit[]): Assembled
   for (const change of changes) {
     const result = render(changeTemplate, { path: change.path, diff: unifiedHunk(change) });
 
-    if (result.ok) parts.push(result.text);
+    if (result.ok) parts.push(change.isPredicted ? `${PREDICTED_MARK}${result.text}` : result.text);
     else for (const name of result.unknown) unknown.add(name);
   }
 

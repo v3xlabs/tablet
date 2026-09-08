@@ -81,7 +81,7 @@ const base = {
   budget: 4000,
   target,
   chunks: [],
-  changes: [{ path: "src/cart.py", line: 2, before: "def total_price(items):\n    total = 0", after: "def total_price(items, tax_rate):\n    total = 0" }],
+  changes: [{ path: "src/cart.py", line: 2, isPredicted: false, before: "def total_price(items):\n    total = 0", after: "def total_price(items, tax_rate):\n    total = 0" }],
   diagnostics: [],
 };
 
@@ -182,11 +182,11 @@ describe("readZeta", () => {
 
 describe("unifiedHunk", () => {
   it("writes context, removed, and added lines with a header from the block's line", () => {
-    expect(unifiedHunk({ path: "a.ts", line: 9, before: "a\nb\nc", after: "a\nB\nc" })).toBe("@@ -10,3 +10,3 @@\n a\n-b\n+B\n c");
+    expect(unifiedHunk({ path: "a.ts", line: 9, isPredicted: false, before: "a\nb\nc", after: "a\nB\nc" })).toBe("@@ -10,3 +10,3 @@\n a\n-b\n+B\n c");
   });
 
   it("writes a pure insertion", () => {
-    expect(unifiedHunk({ path: "a.ts", line: 0, before: "a\nc", after: "a\nb\nc" })).toBe("@@ -1,2 +1,3 @@\n a\n+b\n c");
+    expect(unifiedHunk({ path: "a.ts", line: 0, isPredicted: false, before: "a\nc", after: "a\nb\nc" })).toBe("@@ -1,2 +1,3 @@\n a\n+b\n c");
   });
 });
 
@@ -210,5 +210,13 @@ describe("zeta configuration", () => {
 
     expect(parsed.configurations).toEqual([]);
     expect(parsed.problems[0]).toContain("expected path or diff");
+  });
+});
+
+describe("assembleZeta, accepted predictions in the history", () => {
+  it("marks an accepted prediction the way zed does", () => {
+    const assembled = assembleZeta({ ...base, changes: [{ ...base.changes[0], isPredicted: true }] });
+
+    expect(assembled.ok && assembled.prompt).toContain("<filename>edit_history\n// User accepted prediction:\n--- a/src/cart.py");
   });
 });

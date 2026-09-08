@@ -1,34 +1,23 @@
 import { readCache, writeCache } from "./cache";
 import { recentFileChunks } from "./context/recent-files";
+import type { Chunk } from "./context/ring-buffer";
 import type { EditTarget } from "./format/next-edit";
 import { assembleZeta, readZeta } from "./format/zeta";
 import { derivedRepairs, modelFirst } from "./rank";
-import { windowAround } from "./snapshot";
 import type { SuggestDependencies, SuggestInput, Suggestion, SuggestResult } from "./suggest";
+import { diagnosticTarget, localTarget } from "./targets";
 
-/**
- * Zeta rewrites the blocks around the cursor and nothing else, so there is one target
- * and one ask. The repairs the extension derives for itself still come first, and still
- * skip the request when they land on the cursor line.
- */
-export const askZeta = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
-  const { configuration: config, snapshot } = input;
+const askZetaFor = async (
+  input: SuggestInput,
+  dependencies: SuggestDependencies,
+  target: EditTarget,
+  chunks: Chunk[],
+): Promise<SuggestResult> => {
+  const { configuration: config } = input;
 
   if (config.format !== "zeta") return { kind: "none", reason: "the active configuration is for the other format" };
 
-  const span = windowAround(snapshot.lines.length, snapshot.cursorLine, config.windowLines);
-  const target: EditTarget = {
-    path: snapshot.path,
-    lines: snapshot.lines,
-    windowStart: span.start,
-    windowEnd: span.end,
-    cursor: { line: snapshot.cursorLine, character: snapshot.cursorCharacter },
-    previousWindow: undefined,
-  };
-
   const derived = derivedRepairs(target, input.changes, input.diagnostics);
-
-  const nearby = await recentFileChunks(input, dependencies, config.contextFiles, config.windowLines);
 
   const assembled = assembleZeta({
     template: config.template,
@@ -39,7 +28,7 @@ export const askZeta = async (input: SuggestInput, dependencies: SuggestDependen
     contextLines: config.contextLines,
     budget: input.budget,
     target,
-    chunks: [...input.chunks, ...nearby].filter(chunk => chunk.path !== target.path),
+    chunks: chunks.filter(chunk => chunk.path !== target.path),
     changes: input.changes,
     diagnostics: input.diagnostics,
   });
@@ -87,4 +76,33 @@ export const askZeta = async (input: SuggestInput, dependencies: SuggestDependen
   return suggestions.length === 0
     ? { kind: "none", reason: `the model returned ${target.path} unchanged` }
     : { kind: "suggestions", suggestions };
+};
+
+/**
+ * Zeta rewrites the blocks around a cursor, so the first ask is at the reader's cursor.
+ * When that comes back empty and the linter flags a line elsewhere, a second ask puts
+ * the cursor marker on the flagged position, which is what zed does when a diagnostic
+ * arrives after an edit: the fix is offered where the error is.
+ */
+export const askZeta = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
+  const { configuration: config } = input;
+
+  if (config.format !== "zeta") return { kind: "none", reason: "the active configuration is for the other format" };
+
+  const nearby = await recentFileChunks(input, dependencies, config.contextFiles, config.windowLines);
+  const chunks = [...input.chunks, ...nearby];
+  const local = await askZetaFor(input, dependencies, localTarget(input, config.windowLines), chunks);
+
+  if (local.kind !== "none") return local;
+
+  const flagged = diagnosticTarget(input, config.windowLines);
+
+  if (flagged === undefined) return local;
+
+  const there = await askZetaFor(input, dependencies, {
+    ...flagged.target,
+    cursor: { line: flagged.diagnostic.line, character: flagged.diagnostic.character },
+  }, chunks);
+
+  return there.kind === "none" ? local : there;
 };

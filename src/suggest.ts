@@ -12,6 +12,7 @@ import { filterCompletion } from "./format/fim-filter";
 import { assembleNextEdit, type EditTarget, readNextEdit } from "./format/next-edit";
 import { derivedRepairs, modelFirst, orderedByRelevance, uniqueBy } from "./rank";
 import { lineSuffixOf, type Snapshot, windowAround } from "./snapshot";
+import { diagnosticTarget, localTarget } from "./targets";
 
 export type Suggestion
   = | { kind: "completion"; text: string; }
@@ -43,20 +44,6 @@ export type SuggestResult
     | { kind: "none"; reason: string; }
     | { kind: "failure"; failure: EndpointFailure; }
     | { kind: "invalid"; unknown: string[]; };
-
-const localTarget = (input: SuggestInput, windowLines: number): EditTarget => {
-  const { snapshot } = input;
-  const span = windowAround(snapshot.lines.length, snapshot.cursorLine, windowLines);
-
-  return {
-    path: snapshot.path,
-    lines: snapshot.lines,
-    windowStart: span.start,
-    windowEnd: span.end,
-    cursor: { line: snapshot.cursorLine, character: snapshot.cursorCharacter },
-    previousWindow: input.previousByPath.get(snapshot.path)?.slice(span.start, span.end),
-  };
-};
 
 const editsFrom = (texts: string[], target: EditTarget, formatMarker: string, cursorMarker: string): Suggestion[] => {
   const edits: Suggestion[] = [];
@@ -239,34 +226,6 @@ const finalNewlineFix = (snapshot: Snapshot): Suggestion | undefined => {
   };
 };
 
-/**
- * The linter already knows where the file is broken, and the model proposes edits close to
- * the cursor marker far more readily than away from it. When the nearest diagnostic is not
- * where the cursor is, a second window centred on the diagnostic and free of the marker is
- * what turns "the lsp is failing on line 60" into a suggestion.
- */
-const diagnosticTarget = (input: SuggestInput, windowLines: number): EditTarget | undefined => {
-  const { snapshot } = input;
-  const outside = input.diagnostics.filter(held => Math.abs(held.line - snapshot.cursorLine) > 2);
-  const errors = outside.filter(held => held.severity === "error");
-
-  const chosen = (errors.length > 0 ? errors : outside)
-    .toSorted((left, right) => Math.abs(left.line - snapshot.cursorLine) - Math.abs(right.line - snapshot.cursorLine))[0];
-
-  if (chosen === undefined) return undefined;
-
-  const span = windowAround(snapshot.lines.length, chosen.line, windowLines);
-
-  return {
-    path: snapshot.path,
-    lines: snapshot.lines,
-    windowStart: span.start,
-    windowEnd: span.end,
-    cursor: undefined,
-    previousWindow: input.previousByPath.get(snapshot.path)?.slice(span.start, span.end),
-  };
-};
-
 const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
   const { configuration: config } = input;
 
@@ -281,7 +240,7 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
   const atDiagnostic = diagnosticTarget(input, config.windowLines);
 
   if (atDiagnostic !== undefined) {
-    const there = await askNextEditFor(withContext, dependencies, atDiagnostic);
+    const there = await askNextEditFor(withContext, dependencies, atDiagnostic.target);
 
     if (there.kind !== "none") return there;
   }

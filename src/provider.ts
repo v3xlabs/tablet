@@ -5,17 +5,21 @@ import { appendRecord } from "./collect/store";
 import { watchResolution } from "./collect/watch";
 import { isLanguageEnabled, isProseLanguage, proseProfile } from "./config";
 import type { Diagnostic } from "./context/diagnostics";
+import { notePrediction } from "./context/recent-edits";
 import { addChunk, chunksAround } from "./context/ring-buffer";
 import { hasSecret, isSecretPath, redactSecrets } from "./context/sanitize";
+import { scoreOf, withScore } from "./eagerness";
 import { complete, describeFailure } from "./endpoint";
 import { estimateTokens } from "./format/budget";
 import { describeItem, formatFallback, itemsFor, uriFor } from "./format/inline-items";
 import { logDebug, logError, logInfo } from "./logger";
-import { activeConfig, isAutomaticEnabled, isCollectEnabled, noteFile, type PendingRecord, promptBudget, relativePath, type Runtime, statusMarks } from "./runtime";
+import { definitionChunks } from "./lsp";
+import { activeConfig, isAutomaticEnabled, isCollectEnabled, noteFile, type PendingRecord, promptBudget, relativePath, type Runtime, scaledDelay, statusMarks } from "./runtime";
 import { parseSecretSpec, resolveAll, resolveSecret, type SecretSource } from "./secret";
 import { type Snapshot, windowAround } from "./snapshot";
+import { speculativeInput } from "./speculate";
 import { idleStatus, renderStatus } from "./status-bar";
-import { suggest, type SuggestResult } from "./suggest";
+import { suggest, type SuggestInput, type SuggestResult } from "./suggest";
 
 const MOVED_FAR_ENOUGH_TO_PICK = 32;
 const DIAGNOSTIC_LIMIT = 12;
@@ -159,6 +163,15 @@ const RECORD_WINDOW_LINES = 21;
 export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemProvider => ({
   handleEndOfLifetime: (item, reason) => {
     const pending = runtime.pending.get(item) ?? runtime.lastPending;
+    const score = scoreOf(outcomeOf(reason));
+
+    if (score !== undefined) runtime.scores = withScore(runtime.scores, score);
+
+    if (reason.kind === vscode.InlineCompletionEndOfLifeReasonKind.Accepted) {
+      const accepted = runtime.lastServed?.suggestions.find(held => held.kind === "edit");
+
+      if (accepted?.kind === "edit") notePrediction(runtime.tracker, accepted.path, accepted.text);
+    }
 
     if (pending !== undefined) settle(runtime, pending, reason);
 
@@ -222,7 +235,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     }
 
     if (isAutomatic) {
-      await delay(settings.get<number>("debounceMs") ?? 150);
+      await delay(scaledDelay(runtime, settings.get<number>("debounceMs") ?? 150));
 
       if (token.isCancellationRequested) return;
     }
@@ -259,19 +272,24 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
     const exchanges: Exchange[] = [];
     const diagnostics = diagnosticsFor(document.uri, position.line);
+    const definitions = await definitionChunks(document, position, snapshot);
+
+    if (definitions.length > 0) logInfo(runtime.output, `${config.name}: ${definitions.length} definition excerpt(s) from the language server`);
+
+    const suggestInput: SuggestInput = {
+      configuration: config,
+      budget: promptBudget(runtime, config),
+      snapshot,
+      chunks: [...runtime.ring.chunks, ...definitions],
+      changes: runtime.tracker.log.edits,
+      diagnostics,
+      repo: vscode.workspace.workspaceFolders?.[0]?.name ?? "",
+      previousByPath: runtime.tracker.previousByPath,
+      candidatePaths: runtime.candidatePaths,
+    };
 
     const ask = (): Promise<SuggestResult> => suggest(
-      {
-        configuration: config,
-        budget: promptBudget(runtime, config),
-        snapshot,
-        chunks: runtime.ring.chunks,
-        changes: runtime.tracker.log.edits,
-        diagnostics,
-        repo: vscode.workspace.workspaceFolders?.[0]?.name ?? "",
-        previousByPath: runtime.tracker.previousByPath,
-        candidatePaths: runtime.candidatePaths,
-      },
+      suggestInput,
       {
         complete: async (prompt) => {
           logInfo(runtime.output, `asking ${config.name}, ${estimateTokens(prompt)} estimated tokens`);
@@ -385,6 +403,34 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     runtime.lastServed = { path: snapshot.path, text: snapshotText, suggestions: safe };
 
     const items = await itemsFor(safe, document, position, config);
+
+    // the answer to "and after this one?" is asked while this one is still on screen, so
+    // an accept finds the next suggestion already in the cache
+    const leading = safe[0];
+    const ahead = leading === undefined || items.length === 0 ? undefined : speculativeInput(suggestInput, leading);
+
+    if (ahead !== undefined) {
+      logInfo(runtime.output, `${config.name}: asking ahead as if the first suggestion were accepted`);
+
+      void suggest(ahead, {
+        complete: prompt => complete({
+          endpoint: config.endpoint,
+          apiKey: key.value,
+          headers: headers.values,
+          model: config.model,
+          prompt,
+          maxTokens: config.maxTokens,
+          temperature: config.temperature,
+          stop: config.stop,
+          extraBody: config.extraBody,
+          timeoutMs: settings.get<number>("requestTimeoutMs") ?? 10_000,
+          signal: new AbortController().signal,
+        }),
+        readFile: readFileLines,
+        diagnosticsFor: () => [],
+        cache: runtime.cache,
+      });
+    }
 
     // a suggestion the editor cannot be given is the case that looks like a silent failure
     // from outside: the server logged an answer and nothing appeared on screen

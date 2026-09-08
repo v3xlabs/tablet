@@ -68,7 +68,7 @@ describe("assembleNextEdit", () => {
   it("renders each recent change as its own diff block", () => {
     const assembled = assembleNextEdit({
       ...base,
-      changes: [{ path: "src/user.ts", line: 0, before: "  name: string;", after: "  displayName: string;" }],
+      changes: [{ path: "src/user.ts", line: 0, isPredicted: false, before: "  name: string;", after: "  displayName: string;" }],
     });
 
     expect(assembled.ok && assembled.prompt).toContain(

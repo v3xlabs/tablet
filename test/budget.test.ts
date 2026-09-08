@@ -91,7 +91,7 @@ const base = {
     { path: "src/other.ts", startLine: 0, lines: Array.from({ length: 16 }, (_, index) => `export const other${index} = ${index};`) },
     { path: "src/third.ts", startLine: 0, lines: Array.from({ length: 16 }, (_, index) => `export const third${index} = ${index};`) },
   ],
-  changes: [{ path: "src/big.ts", line: 0, before: "const value1 = 1;", after: "const value1 = 10;" }],
+  changes: [{ path: "src/big.ts", line: 0, isPredicted: false, before: "const value1 = 1;", after: "const value1 = 10;" }],
   diagnostics: [
     { line: 200, character: 0, severity: "error", source: "ts", message: "on the window" },
     { line: 20, character: 0, severity: "warning", source: "ts", message: "far away" },
