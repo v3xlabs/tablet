@@ -92,40 +92,103 @@ export type BodyRead
     | { kind: "native"; }
     | { kind: "unreadable"; };
 
+type ChoicesRead
+  = | { kind: "choices"; choices: Array<{ index: number; text: string; }>; }
+    | { kind: "native"; }
+    | { kind: "unreadable"; };
+
 /**
  * llama.cpp serves its own format at {base}/completions and the OpenAI one at
  * {base}/v1/completions, so an endpoint missing the /v1 suffix answers with content
  * rather than choices. Telling those two apart is the difference between a useful
  * message and "no choices in the body".
  */
-export const readCompletionBody = (body: unknown): BodyRead => {
+const readChoices = (body: unknown): ChoicesRead => {
   if (typeof body !== "object" || body === null) return { kind: "unreadable" };
 
-  const choices = (body as { choices?: unknown; }).choices;
-
-  if (!Array.isArray(choices)) {
-    return typeof (body as { content?: unknown; }).content === "string"
+  if (!("choices" in body) || !Array.isArray(body.choices)) {
+    return "content" in body && typeof body.content === "string"
       ? { kind: "native" }
       : { kind: "unreadable" };
   }
 
-  const texts: string[] = [];
+  const choices: unknown[] = body.choices;
+  const read: Array<{ index: number; text: string; }> = [];
 
-  for (const choice of choices) {
-    if (typeof choice !== "object" || choice === null) continue;
+  for (const [position, choice] of choices.entries()) {
+    if (typeof choice !== "object" || choice === null || !("text" in choice) || typeof choice.text !== "string") continue;
 
-    const text = (choice as { text?: unknown; }).text;
+    const index = "index" in choice && typeof choice.index === "number" ? choice.index : position;
 
-    if (typeof text === "string") texts.push(text);
+    read.push({ index, text: choice.text });
   }
 
-  return { kind: "texts", texts };
+  return { kind: "choices", choices: read };
+};
+
+export const readCompletionBody = (body: unknown): BodyRead => {
+  const read = readChoices(body);
+
+  return read.kind === "choices" ? { kind: "texts", texts: read.choices.map(choice => choice.text) } : read;
+};
+
+/**
+ * Joins server-sent completion chunks into one text per choice. Each `data:` line holds
+ * a body shaped like a whole reply, carrying the next piece of each choice it names.
+ */
+export const readEventStream = async (body: ReadableStream<Uint8Array>): Promise<BodyRead> => {
+  const texts = new Map<number, string>();
+  const decoder = new TextDecoder();
+  let held = "";
+
+  const readLine = (line: string): BodyRead | "done" | undefined => {
+    if (!line.startsWith("data:")) return undefined;
+
+    const data = line.slice("data:".length).trim();
+
+    if (data === "[DONE]") return "done";
+
+    const read = readChoices(JSON.parse(data));
+
+    if (read.kind !== "choices") return read;
+
+    for (const choice of read.choices) texts.set(choice.index, (texts.get(choice.index) ?? "") + choice.text);
+
+    return undefined;
+  };
+
+  const collected = (): BodyRead => ({
+    kind: "texts",
+    texts: [...texts].toSorted(([left], [right]) => left - right).map(([, text]) => text),
+  });
+
+  for await (const bytes of body) {
+    held += decoder.decode(bytes, { stream: true });
+
+    const lines = held.split("\n");
+
+    held = lines.pop() ?? "";
+
+    for (const line of lines) {
+      const read = readLine(line);
+
+      if (read === "done") return collected();
+
+      if (read !== undefined) return read;
+    }
+  }
+
+  const last = readLine(held + decoder.decode());
+
+  return last === undefined || last === "done" ? collected() : last;
 };
 
 export const complete = async (request: CompletionRequest): Promise<CompletionResult> => {
   const url = `${request.endpoint.replace(/\/+$/, "")}/completions`;
   const timeout = AbortSignal.timeout(request.timeoutMs);
 
+  // streamed so that an abort closes the connection mid-generation: llama.cpp keeps
+  // decoding a plain request whose client has gone, holding a slot the next ask needs
   const body = {
     ...request.extraBody,
     model: request.model,
@@ -133,7 +196,15 @@ export const complete = async (request: CompletionRequest): Promise<CompletionRe
     max_tokens: request.maxTokens,
     temperature: request.temperature,
     stop: request.stop,
-    stream: false,
+    stream: true,
+  };
+
+  const failureOf = (error: unknown): EndpointFailure => {
+    if (request.signal.aborted) return { kind: "aborted" };
+
+    if (timeout.aborted) return { kind: "timeout" };
+
+    return { kind: "unreachable", detail: String(error) };
   };
 
   let response: Response;
@@ -151,11 +222,7 @@ export const complete = async (request: CompletionRequest): Promise<CompletionRe
     });
   }
   catch (error) {
-    if (request.signal.aborted) return { ok: false, failure: { kind: "aborted" } };
-
-    if (timeout.aborted) return { ok: false, failure: { kind: "timeout" } };
-
-    return { ok: false, failure: { kind: "unreachable", detail: String(error) } };
+    return { ok: false, failure: failureOf(error) };
   }
 
   if (!response.ok) {
@@ -167,22 +234,23 @@ export const complete = async (request: CompletionRequest): Promise<CompletionRe
     return { ok: false, failure: { kind: "status", status: response.status, detail: detail.slice(0, 400) } };
   }
 
-  let parsed: unknown;
+  const isStream = (response.headers.get("content-type") ?? "").includes("text/event-stream");
+  let read: BodyRead;
 
   try {
-    parsed = await response.json();
+    read = isStream && response.body !== null
+      ? await readEventStream(response.body)
+      : readCompletionBody(await response.json());
   }
   catch (error) {
+    if (request.signal.aborted || timeout.aborted) return { ok: false, failure: failureOf(error) };
+
     return { ok: false, failure: { kind: "malformed", url, detail: String(error) } };
   }
 
-  const read = readCompletionBody(parsed);
-
   if (read.kind === "native") return { ok: false, failure: { kind: "native-api", url } };
 
-  if (read.kind === "unreadable") {
-    return { ok: false, failure: { kind: "malformed", url, detail: JSON.stringify(parsed).slice(0, 300) } };
-  }
+  if (read.kind === "unreadable") return { ok: false, failure: { kind: "malformed", url, detail: "no choices in the reply" } };
 
   return { ok: true, texts: read.texts };
 };

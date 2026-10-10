@@ -6,8 +6,9 @@ import { type Config, isLanguageEnabled, parseConfigurations, type ParseResult, 
 import { type ChangeTracker, emptyTracker } from "./context/recent-edits";
 import { emptyRing, type Ring } from "./context/ring-buffer";
 import { delayFactor, type Eagerness, type EagernessSetting, levelOf } from "./eagerness";
+import type { CompletionResult } from "./endpoint";
 import { idleStatus, renderStatus, type StatusMarks } from "./status-bar";
-import type { Suggestion } from "./suggest";
+import type { Suggestion, SuggestResult } from "./suggest";
 
 export const OVERRIDE_KEY = "activeConfig.override";
 export const ENABLED_KEY = "enabled.override";
@@ -27,7 +28,12 @@ export type Runtime = {
   candidatePaths: string[];
   lastPickLine: number;
   lastPickHash: string | undefined;
-  inFlight: AbortController | undefined;
+  /** The latest request, kept past a keystroke so its answer can be carried over the typing. */
+  inFlight: { controller: AbortController; path: string; text: string; result: Promise<SuggestResult>; } | undefined;
+  /** The request asked as if the shown suggestion were accepted, by prompt, so an accept can join it. */
+  ahead: { controller: AbortController; replies: Map<string, Promise<CompletionResult>>; } | undefined;
+  /** Set while automatic suggestions are muted; the timer lifts the mute. */
+  snooze: { until: Date; timer: NodeJS.Timeout; } | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
   /** The context size the endpoint reported when it refused a prompt, held for the session. */
   contextLimit: number | undefined;
@@ -63,6 +69,8 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     lastPickLine: -9999,
     lastPickHash: undefined,
     inFlight: undefined,
+    ahead: undefined,
+    snooze: undefined,
     idleTimer: undefined,
     contextLimit: undefined,
     globalStoragePath: context.globalStorageUri.fsPath,
@@ -150,9 +158,12 @@ export const eagernessOf = (runtime: Runtime): Eagerness =>
 /** A configured delay, stretched or shortened by how the recent suggestions went. */
 export const scaledDelay = (runtime: Runtime, ms: number): number => Math.round(ms * delayFactor(eagernessOf(runtime)));
 
+export const isSnoozed = (runtime: Runtime): boolean => runtime.snooze !== undefined;
+
 export const statusMarks = (runtime: Runtime): StatusMarks => ({
   isDevelopment: runtime.isDev,
   isPaused: !isAutomaticEnabled(runtime),
+  snoozedUntil: runtime.snooze?.until,
   isCollecting: isCollectEnabled(),
   eagerness: eagernessOf(runtime),
 });
@@ -183,7 +194,7 @@ export const scheduleIdleTrigger = (runtime: Runtime, editor: vscode.TextEditor 
 
   if (editor === undefined || !editor.selection.isEmpty || editor.document.uri.scheme !== "file") return;
 
-  if (!isAutomaticEnabled(runtime)) return;
+  if (!isAutomaticEnabled(runtime) || isSnoozed(runtime)) return;
 
   const settings = vscode.workspace.getConfiguration("tablet");
 
@@ -203,4 +214,35 @@ export const cancelIdleTrigger = (runtime: Runtime): void => {
   if (runtime.idleTimer !== undefined) clearTimeout(runtime.idleTimer);
 
   runtime.idleTimer = undefined;
+};
+
+const SNOOZE_MS = 60_000;
+
+/**
+ * Mutes automatic suggestions for a minute, for the stretch of editing where they are in
+ * the way. What is on screen goes, and what is being asked is dropped. Asking by hand
+ * still works. Snoozing again while muted lifts the mute early.
+ */
+export const toggleSnooze = async (runtime: Runtime): Promise<void> => {
+  if (runtime.snooze !== undefined) {
+    clearTimeout(runtime.snooze.timer);
+    runtime.snooze = undefined;
+    showActive(runtime);
+
+    return;
+  }
+
+  runtime.snooze = {
+    until: new Date(Date.now() + SNOOZE_MS),
+    timer: setTimeout(() => {
+      runtime.snooze = undefined;
+      showActive(runtime);
+    }, SNOOZE_MS),
+  };
+
+  cancelIdleTrigger(runtime);
+  runtime.inFlight?.controller.abort();
+  runtime.ahead?.controller.abort();
+  showActive(runtime);
+  await vscode.commands.executeCommand("editor.action.inlineSuggest.hide");
 };

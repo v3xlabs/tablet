@@ -12,13 +12,16 @@ import { splitIntoEdits, type WindowEdit } from "./window-diff";
 export const ZETA_PLACEHOLDERS = ["path", "prefix", "suffix", "editable", "history", "context", "diagnostics"];
 
 /**
- * The zeta 2.1 layout: suffix, then prefix holding related files and the edit history,
- * then the file up to and through the editable region, then the middle tag. The
- * editable region is cut into numbered blocks and the model answers with the blocks it
- * rewrote, from the first tag it names to the last.
+ * The zeta 2.1 layout: suffix, then prefix holding related files and the file up to the
+ * editable region, then the middle tag. The editable region is cut into numbered blocks
+ * and the model answers with the blocks it rewrote, from the first tag it names to the
+ * last. Zed's order puts the edit history ahead of the file; here it sits after the file
+ * text and the file is named again before the editable region, since the history changes
+ * on every keystroke and the server can then reuse its cache for everything before it.
+ * The bench scores both orders the same.
  */
 export const ZETA_DEFAULTS = {
-  template: "<[fim-suffix]>{{suffix}}\n<[fim-prefix]>{{context}}{{diagnostics}}{{history}}<filename>{{path}}\n{{prefix}}{{editable}}<[fim-middle]>",
+  template: "<[fim-suffix]>{{suffix}}\n<[fim-prefix]>{{context}}{{diagnostics}}<filename>{{path}}\n{{prefix}}{{history}}<filename>{{path}}\n{{editable}}<[fim-middle]>",
   chunkTemplate: "<filename>{{path}}\n{{text}}\n\n",
   changeTemplate: "--- a/{{path}}\n+++ b/{{path}}\n{{diff}}\n",
   // zed's V0420 format carries a diagnostics section ahead of the related files; zeta 2.1
@@ -46,51 +49,63 @@ const MIN_BLOCK_LINES = 6;
 const MAX_BLOCK_LINES = 16;
 const MAX_NUDGE_LINES = 5;
 
-const STRUCTURAL_TAIL = /^(?:[)\]}]+[;,]?|(?:break|continue|return|throw|end)\b.*)$/;
+const STRUCTURAL_KEYWORDS: Record<string, true> = { break: true, continue: true, return: true, throw: true, end: true };
 
-const isStructuralTail = (line: string): boolean => STRUCTURAL_TAIL.test(line.trim());
+const isStructuralTail = (trimmed: string): boolean =>
+  /^[)\]}]/.test(trimmed) || STRUCTURAL_KEYWORDS[trimmed.replace(/;+$/, "")] === true;
+
+const isBlank = (line: string): boolean => line.trim() === "";
+
+const isGoodStart = (line: string): boolean => !isBlank(line) && !isStructuralTail(line.trim());
 
 /**
- * Block starts, as line offsets into the editable region. A block is six to sixteen
- * lines, cut after a blank line where one falls in range, and never opened on a line
- * that only closes something, since the model then has to answer with a block that
- * begins mid-construct.
+ * Block starts, as line offsets into the editable region, cut the way zed's
+ * `compute_marker_offsets_v0318` cuts them, since zeta 2.1 was trained on exactly those
+ * boundaries: after a blank line once six lines are in, and forced at sixteen, each
+ * nudged up to five lines forward past a line that only closes something.
  */
 export const blockStarts = (lines: string[]): number[] => {
-  const starts: number[] = [];
-  let blockStart = 0;
+  const starts = [0];
+  const goodStartFrom = (from: number): number | undefined => {
+    for (let index = from; index < Math.min(lines.length, from + MAX_NUDGE_LINES); index++) {
+      if (isGoodStart(lines[index] ?? "")) return index;
+    }
 
-  const isBlockStart = (index: number): boolean => {
-    const length = index - blockStart;
-
-    if (length < MIN_BLOCK_LINES) return false;
-
-    const isAfterBlank = (lines[index - 1] ?? "").trim() === "";
-    const isFull = length >= MAX_BLOCK_LINES;
-
-    if (!isAfterBlank && !isFull) return false;
-
-    const isNudged = length >= MAX_BLOCK_LINES + MAX_NUDGE_LINES;
-
-    return isNudged || !isStructuralTail(lines[index] ?? "");
+    return undefined;
   };
 
-  for (let index = 1; index < lines.length; index++) {
-    if (!isBlockStart(index)) continue;
+  let index = 0;
 
-    starts.push(blockStart);
-    blockStart = index;
+  while (index < lines.length) {
+    const lastStart = starts[starts.length - 1] ?? 0;
+    const gap = index - lastStart;
+    const line = lines[index] ?? "";
+    const isAfterBlank = index > 0 && isBlank(lines[index - 1] ?? "");
+
+    if (isAfterBlank && gap >= MIN_BLOCK_LINES && !isBlank(line)) {
+      const target = isGoodStart(line) ? index : goodStartFrom(index) ?? index;
+
+      if (target > lastStart && lines.length - target >= MIN_BLOCK_LINES) {
+        starts.push(target);
+        index = target + 1;
+
+        continue;
+      }
+    }
+
+    if (gap >= MAX_BLOCK_LINES) {
+      const target = goodStartFrom(index) ?? index;
+
+      if (target > lastStart) {
+        starts.push(target);
+        index = target + 1;
+
+        continue;
+      }
+    }
+
+    index++;
   }
-
-  // a short final block folds into the one before it when the pair still reads as one
-  const last = starts[starts.length - 1];
-  const isShortTail = lines.length - blockStart < MIN_BLOCK_LINES;
-
-  if (isShortTail && last !== undefined && lines.length - last <= MAX_BLOCK_LINES + MAX_NUDGE_LINES) {
-    return starts;
-  }
-
-  starts.push(blockStart);
 
   return starts;
 };
@@ -217,34 +232,43 @@ export type ZetaReply
 
 /**
  * The reply names the first and last block it touched and carries the new text between
- * them. The same tag twice means nothing changed. Everything outside the named span is
- * the region as it was, so the whole window is rebuilt and diffed against itself.
+ * them. The same tag twice means nothing changed. A reply spanning several blocks
+ * repeats the tags between them, often moved to a line of their own, so the span is
+ * read as the bytes between consecutive tags joined, which is how zed reads it.
+ * Everything outside the named span is the region as it was, so the whole window is
+ * rebuilt and diffed against itself.
  */
 export const readZeta = (reply: string, target: EditTarget, cursorMarker: string): ZetaReply => {
-  let first: RegExpExecArray | undefined;
-  let last: RegExpExecArray | undefined;
-
-  for (const match of reply.matchAll(MARKER)) {
-    first ??= match;
-    last = match;
-  }
+  const tags = Array.from(reply.matchAll(MARKER));
+  const first = tags[0];
+  const last = tags[tags.length - 1];
 
   if (first === undefined || last === undefined || first.index === last.index) return { kind: "none" };
 
   const from = Number(first[1]);
   const upto = Number(last[1]);
 
-  if (from >= upto) return { kind: "none" };
+  // tags that skip or go back mean the reply lost track of the region, and reading it
+  // anyway would replace blocks the model never wrote out
+  const isInOrder = tags.every((tag, index) => {
+    const step = index === 0 ? 0 : Number(tag[1]) - Number(tags[index - 1]?.[1]);
+
+    return step === 0 || step === 1;
+  });
+
+  if (!isInOrder || from >= upto) return { kind: "none" };
 
   const lines = windowOf(target);
   const starts = blockStarts(lines);
   const startLine = starts[from - 1];
 
-  if (startLine === undefined) return { kind: "none" };
+  if (startLine === undefined || upto > starts.length + 1) return { kind: "none" };
 
   const endLine = starts[upto - 1] ?? lines.length;
 
-  const content = reply.slice(first.index + first[0].length, last.index).replaceAll(cursorMarker, "");
+  const content = reply.slice(first.index + first[0].length, last.index)
+    .replaceAll(MARKER, "")
+    .replaceAll(cursorMarker, "");
   const middle = content.split("\n");
 
   if (middle[middle.length - 1] === "") middle.pop();

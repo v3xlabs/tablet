@@ -20,16 +20,24 @@ describe("blockStarts", () => {
     expect(blockStarts(lines)).toEqual([0, 9]);
   });
 
-  it("does not open a block on a line that only closes something", () => {
+  it("nudges a boundary past a line that only closes something", () => {
     const lines = [...numbered(8), "", "}", ...numbered(20)];
 
-    expect(blockStarts(lines)).toEqual([0, 16]);
+    expect(blockStarts(lines)).toEqual([0, 10, 26]);
   });
 
-  it("folds a short tail into the block before it", () => {
-    const lines = [...numbered(16), "", "tail"];
+  it("does not cut after a blank line when fewer than six lines would follow", () => {
+    const lines = [...numbered(8), "", ...numbered(3)];
 
     expect(blockStarts(lines)).toEqual([0]);
+  });
+
+  it("treats a bare return as a closing line and a return with a value as a start", () => {
+    const bare = [...numbered(8), "", "  return;", ...numbered(10)];
+    const valued = [...numbered(8), "", "  return total;", ...numbered(10)];
+
+    expect(blockStarts(bare)).toEqual([0, 10]);
+    expect(blockStarts(valued)).toEqual([0, 9]);
   });
 
   it("keeps a region under six lines as one block", () => {
@@ -86,14 +94,17 @@ const base = {
 };
 
 describe("assembleZeta", () => {
-  it("lays out suffix, prefix with history, the file, and the middle tag", () => {
+  it("lays out suffix, prefix, the file, the history, the editable region, and the middle tag", () => {
     const assembled = assembleZeta(base);
 
     expect(assembled.ok && assembled.prompt).toBe([
       "<[fim-suffix]>",
       "def count(items):",
       "    return len(items)",
-      "<[fim-prefix]><filename>edit_history",
+      "<[fim-prefix]><filename>src/cart.py",
+      "import math",
+      "",
+      "<filename>edit_history",
       "--- a/src/cart.py",
       "+++ b/src/cart.py",
       "@@ -3,2 +3,2 @@",
@@ -102,8 +113,6 @@ describe("assembleZeta", () => {
       "     total = 0",
       "",
       "<filename>src/cart.py",
-      "import math",
-      "",
       "<|marker_1|>def total_price(items, tax_rate):",
       "    total = 0",
       "    for item in items:",
@@ -121,11 +130,11 @@ describe("assembleZeta", () => {
     expect(assembled.ok && assembled.prompt).toContain("<[fim-prefix]><filename>src/cart.py");
   });
 
-  it("renders related files before the history", () => {
+  it("renders related files ahead of the file", () => {
     const assembled = assembleZeta({ ...base, chunks: [{ path: "src/item.py", startLine: 0, lines: ["class Item:", "    price: float"] }] });
     const prompt = assembled.ok ? assembled.prompt : "";
 
-    expect(prompt).toContain("<[fim-prefix]><filename>src/item.py\nclass Item:\n    price: float\n\n<filename>edit_history");
+    expect(prompt).toContain("<[fim-prefix]><filename>src/item.py\nclass Item:\n    price: float\n\n<filename>src/cart.py");
   });
 
   it("drops chunks before it drops history when over budget", () => {
@@ -177,6 +186,26 @@ describe("readZeta", () => {
       kind: "edits",
       edits: [{ startLine: 20, startCharacter: 0, endLine: 20, endCharacter: 4, text: "changed" }],
     });
+  });
+
+  it("reads a reply spanning several blocks without leaving the tags between them in the text", () => {
+    const lines = ["a0", "a1", "a2", "a3", "a4", "a5", "", "b0", "b1", "b2", "b3", "b4", "b5"];
+    const region: EditTarget = { path: "a.ts", lines, windowStart: 0, windowEnd: lines.length, cursor: { line: 0, character: 2 }, previousWindow: undefined };
+    // zeta 2.1 moves an inner tag onto its own line, ahead of the blank line it followed
+    const reply = "<|marker_1|>a0\na1\na2\na3\na4\na5\n<|marker_2|>\nB0\nb1\nb2\nb3\nb4\nb5\n<|marker_3|>";
+
+    expect(readZeta(reply, region, "<|user_cursor|>")).toEqual({
+      kind: "edits",
+      edits: [{ startLine: 7, startCharacter: 0, endLine: 7, endCharacter: 1, text: "B" }],
+    });
+  });
+
+  it("refuses a reply whose tags skip a block or name one past the region", () => {
+    const lines = ["a0", "a1", "a2", "a3", "a4", "a5", "", "b0", "b1", "b2", "b3", "b4", "b5"];
+    const region: EditTarget = { path: "a.ts", lines, windowStart: 0, windowEnd: lines.length, cursor: { line: 0, character: 2 }, previousWindow: undefined };
+
+    expect(readZeta("<|marker_1|>A0\n<|marker_3|>", region, "<|user_cursor|>")).toEqual({ kind: "none" });
+    expect(readZeta("<|marker_2|>B0\n<|marker_3|>\nextra\n<|marker_4|>", region, "<|user_cursor|>")).toEqual({ kind: "none" });
   });
 });
 

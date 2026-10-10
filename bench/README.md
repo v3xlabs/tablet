@@ -52,6 +52,7 @@ pnpm bench -- --no-format-marker # drop the formatter instruction from the promp
 pnpm bench -- --samples 3 --temperature 0.2 # run every case three times, report per-sample and any-sample
 pnpm bench -- --windowLines 31 --contextLines 100 --endpoint http://127.0.0.1:8080/v1 --model m
 pnpm bench -- --format zeta --endpoint https://host/upstream/zeta-2.1/v1 --model zeta-2.1 # the zeta 2.1 layout
+pnpm bench -- --format zeta --diagnosticTemplate '' --contextLines 16 # try another prompt layout; also --template, --chunkTemplate, --changeTemplate
 pnpm bench -- --budget 4096 # fail a case offline when its estimated prompt would not fit
 ```
 

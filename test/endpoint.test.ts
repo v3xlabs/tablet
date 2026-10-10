@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeFailure, readCompletionBody } from "../src/endpoint";
+import { describeFailure, readCompletionBody, readEventStream } from "../src/endpoint";
 
 describe("readCompletionBody", () => {
   it("reads every choice of an openai compatible reply", () => {
@@ -21,6 +21,33 @@ describe("readCompletionBody", () => {
 
   it("treats a reply with no usable choice as an empty answer", () => {
     expect(readCompletionBody({ choices: [] })).toEqual({ kind: "texts", texts: [] });
+  });
+});
+
+// the server's chunks fall anywhere, including inside a line and inside a character
+const streamOf = (lines: string[]): ReadableStream<Uint8Array> => {
+  const bytes = new TextEncoder().encode(lines.join("\n"));
+  const chunks = Array.from({ length: Math.ceil(bytes.length / 7) }, (_unused, index) => bytes.slice(index * 7, index * 7 + 7));
+
+  return ReadableStream.from(chunks);
+};
+
+describe("readEventStream", () => {
+  it("joins interleaved pieces of several samples by their index", async () => {
+    const read = await readEventStream(streamOf([
+      "data: {\"choices\":[{\"index\":0,\"text\":\"con\"}]}",
+      "",
+      "data: {\"choices\":[{\"index\":1,\"text\":\"let\"}]}",
+      "data: {\"choices\":[{\"index\":0,\"text\":\"st ▁\"}]}",
+      "data: {\"choices\":[{\"index\":1,\"text\":\" a\"}]}",
+      "data: [DONE]",
+    ]));
+
+    expect(read).toEqual({ kind: "texts", texts: ["const ▁", "let a"] });
+  });
+
+  it("recognises llama.cpp's own streamed format", async () => {
+    expect(await readEventStream(streamOf(["data: {\"content\":\"x\",\"stop\":false}"]))).toEqual({ kind: "native" });
   });
 });
 

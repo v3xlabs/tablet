@@ -3,7 +3,7 @@ import { mkdir } from "node:fs/promises";
 import * as vscode from "vscode";
 
 import { collectRoot, exportRecords } from "./collect/store";
-import { activeConfig, allConfigs, ENABLED_KEY, forgetConfig, isAutomaticEnabled, isCollectEnabled, OVERRIDE_KEY, type Runtime, saveConfig, showActive, storedConfigs } from "./runtime";
+import { activeConfig, allConfigs, ENABLED_KEY, forgetConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, OVERRIDE_KEY, type Runtime, saveConfig, showActive, storedConfigs, toggleSnooze } from "./runtime";
 
 const FORMATS = [
   { label: "fim", detail: "fill in the middle, completes where the cursor is" },
@@ -266,6 +266,27 @@ const exportDataset = async (runtime: Runtime): Promise<void> => {
   if (chosen === reveal) await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(exported.file));
 };
 
+/**
+ * The editor shows one inline edit at a time and only cycles ghost text itself, so
+ * another edit is shown by moving it to the front of what tablet holds and asking again,
+ * which re-serves the held suggestions in the new order.
+ */
+const cycleEdits = async (runtime: Runtime, step: 1 | -1): Promise<void> => {
+  const served = runtime.lastServed;
+
+  if (served === undefined) return;
+
+  const edits = served.suggestions.filter(held => held.kind !== "completion");
+
+  if (edits.length < 2) return;
+
+  const shift = (step + edits.length) % edits.length;
+  const completions = served.suggestions.filter(held => held.kind === "completion");
+
+  runtime.lastServed = { ...served, suggestions: [...edits.slice(shift), ...edits.slice(0, shift), ...completions] };
+  await vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
+};
+
 type MenuItem = vscode.QuickPickItem & { command?: string; };
 
 const toggleIcon = (isOn: boolean): string => (isOn ? "$(pass-filled)" : "$(circle-large-outline)");
@@ -281,6 +302,11 @@ const showMenu = async (runtime: Runtime): Promise<void> => {
       label: `${toggleIcon(isOn)} Automatic suggestions`,
       description: isOn ? "on" : "off, manual trigger still works",
       command: "tablet.toggleEnabled",
+    },
+    {
+      label: `${toggleIcon(isSnoozed(runtime))} Snooze for a minute`,
+      description: isSnoozed(runtime) ? "snoozed, pick to resume" : "mutes automatic suggestions",
+      command: "tablet.snooze",
     },
     {
       label: `${toggleIcon(isCollecting)} Data collection`,
@@ -310,7 +336,11 @@ export const registerCommands = (runtime: Runtime): vscode.Disposable[] => [
   vscode.commands.registerCommand("tablet.removeConfiguration", () => removeConfig(runtime)),
   vscode.commands.registerCommand("tablet.clearConfigurationOverride", () => runtime.memento.update(OVERRIDE_KEY, undefined)),
   vscode.commands.registerCommand("tablet.toggleEnabled", () => toggleEnabled(runtime)),
-  vscode.commands.registerCommand("tablet.trigger", () => vscode.commands.executeCommand("editor.action.inlineSuggest.trigger")),
+  vscode.commands.registerCommand("tablet.trigger", () => {
+    runtime.declined = undefined;
+
+    return vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
+  }),
   vscode.commands.registerCommand("tablet.storeKey", () => storeKey(runtime)),
   vscode.commands.registerCommand("tablet.forgetKey", () => forgetKey(runtime)),
   vscode.commands.registerCommand("tablet.showLog", () => runtime.output.show(true)),
@@ -318,4 +348,7 @@ export const registerCommands = (runtime: Runtime): vscode.Disposable[] => [
   vscode.commands.registerCommand("tablet.toggleCollect", () => toggleCollect()),
   vscode.commands.registerCommand("tablet.openDataFolder", () => openDataFolder(runtime)),
   vscode.commands.registerCommand("tablet.exportDataset", () => exportDataset(runtime)),
+  vscode.commands.registerCommand("tablet.snooze", () => toggleSnooze(runtime)),
+  vscode.commands.registerCommand("tablet.nextSuggestion", () => cycleEdits(runtime, 1)),
+  vscode.commands.registerCommand("tablet.previousSuggestion", () => cycleEdits(runtime, -1)),
 ];

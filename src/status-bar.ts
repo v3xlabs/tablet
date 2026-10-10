@@ -10,6 +10,7 @@ export type StatusState
 export type StatusMarks = {
   isDevelopment: boolean;
   isPaused: boolean;
+  snoozedUntil: Date | undefined;
   isCollecting: boolean;
   eagerness: "low" | "medium" | "high";
 };
@@ -31,7 +32,9 @@ export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, mar
       break;
     }
     case "idle": {
-      item.text = `${marks.isPaused ? "$(debug-pause)" : "$(sparkle)"} ${state.name}`;
+      const icon = marks.snoozedUntil === undefined ? "$(sparkle)" : "$(bell-slash)";
+
+      item.text = `${marks.isPaused ? "$(debug-pause)" : icon} ${state.name}`;
       item.tooltip = state.detail === ""
         ? `tablet is using ${state.name}`
         : `tablet is using ${state.name}\nlast answer: ${state.detail}`;
@@ -57,6 +60,8 @@ export const renderStatus = (item: vscode.StatusBarItem, state: StatusState, mar
     item.text += " $(database)";
     item.tooltip = `${item.tooltip ?? ""}\ncollecting records locally`;
   }
+
+  if (marks.snoozedUntil !== undefined) item.tooltip = `${item.tooltip ?? ""}\nsnoozed until ${marks.snoozedUntil.toLocaleTimeString()}`;
 
   item.tooltip = marks.isPaused ? `${item.tooltip ?? ""}\nautomatic suggestions are paused` : `${item.tooltip ?? ""}\neagerness ${marks.eagerness}`;
 

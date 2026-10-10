@@ -86,6 +86,21 @@
         "command": "tablet.exportDataset",
         "title": "Export collected records as one file",
         "category": "tablet"
+      },
+      {
+        "command": "tablet.snooze",
+        "title": "Snooze automatic suggestions for a minute",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.nextSuggestion",
+        "title": "Show the next suggested edit",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.previousSuggestion",
+        "title": "Show the previous suggested edit",
+        "category": "tablet"
       }
     ],
     "keybindings": [
@@ -94,6 +109,21 @@
         "key": "ctrl+alt+\\",
         "mac": "cmd+alt+\\",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "tablet.snooze",
+        "key": "shift+escape",
+        "when": "editorTextFocus && (inlineSuggestionVisible || inlineEditIsVisible)"
+      },
+      {
+        "command": "tablet.nextSuggestion",
+        "key": "alt+]",
+        "when": "editorTextFocus && inlineEditIsVisible && !inlineSuggestionVisible"
+      },
+      {
+        "command": "tablet.previousSuggestion",
+        "key": "alt+[",
+        "when": "editorTextFocus && inlineEditIsVisible && !inlineSuggestionVisible"
       }
     ],
     "configuration": {
@@ -302,7 +332,7 @@
               },
               "diagnosticTemplate": {
                 "type": "string",
-                "markdownDescription": "Rendered once when the file has errors or warnings, substituted into `{{diagnostics}}`. Placeholders: `path`, `text`. Used by `next-edit` and `zeta`, where it is empty by default because the model was not trained with one."
+                "markdownDescription": "Rendered once when the file has errors or warnings, substituted into `{{diagnostics}}`. Placeholders: `path`, `text`. Used by `next-edit` and `zeta`. Zeta 2.1 was trained without this section; it stays on by default because the bench repairs more cases with it."
               },
               "formatMarker": {
                 "type": "string",

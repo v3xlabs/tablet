@@ -1,25 +1,25 @@
 import * as vscode from "vscode";
 
-import type { CollectedRecord, Exchange, Outcome } from "./collect/record";
-import { appendRecord } from "./collect/store";
-import { watchResolution } from "./collect/watch";
+import type { Exchange } from "./collect/record";
+import { outcomeOf, settle } from "./collect/settle";
 import { isLanguageEnabled, isProseLanguage, proseProfile } from "./config";
 import type { Diagnostic } from "./context/diagnostics";
 import { notePrediction } from "./context/recent-edits";
 import { addChunk, chunksAround } from "./context/ring-buffer";
 import { hasSecret, isSecretPath, redactSecrets } from "./context/sanitize";
 import { scoreOf, withScore } from "./eagerness";
-import { complete, describeFailure } from "./endpoint";
+import { complete, type CompletionResult, describeFailure } from "./endpoint";
 import { estimateTokens } from "./format/budget";
 import { describeItem, formatFallback, itemsFor, uriFor } from "./format/inline-items";
 import { logDebug, logError, logInfo } from "./logger";
 import { definitionChunks } from "./lsp";
-import { activeConfig, isAutomaticEnabled, isCollectEnabled, noteFile, type PendingRecord, promptBudget, relativePath, type Runtime, scaledDelay, statusMarks } from "./runtime";
+import { carriedFrom, rebaseSuggestions } from "./rebase";
+import { activeConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, noteFile, type PendingRecord, promptBudget, relativePath, type Runtime, scaledDelay, statusMarks } from "./runtime";
 import { parseSecretSpec, resolveAll, resolveSecret, type SecretSource } from "./secret";
 import { type Snapshot, windowAround } from "./snapshot";
 import { speculativeInput } from "./speculate";
 import { idleStatus, renderStatus } from "./status-bar";
-import { suggest, type SuggestInput, type SuggestResult } from "./suggest";
+import { suggest, type SuggestInput, type Suggestion, type SuggestResult } from "./suggest";
 
 const MOVED_FAR_ENOUGH_TO_PICK = 32;
 const DIAGNOSTIC_LIMIT = 12;
@@ -108,64 +108,23 @@ const updateRing = (runtime: Runtime, snapshot: Snapshot): void => {
   runtime.lastPickHash = hash;
 };
 
-const outcomeOf = (reason: vscode.InlineCompletionEndOfLifeReason): Outcome => {
-  switch (reason.kind) {
-    case vscode.InlineCompletionEndOfLifeReasonKind.Accepted: {
-      return { kind: "accepted" };
-    }
-    case vscode.InlineCompletionEndOfLifeReasonKind.Rejected: {
-      return { kind: "rejected" };
-    }
-    case vscode.InlineCompletionEndOfLifeReasonKind.Ignored: {
-      return { kind: "ignored", userTypingDisagreed: reason.userTypingDisagreed };
-    }
-  }
-};
-
-const writeRecord = async (runtime: Runtime, record: CollectedRecord): Promise<void> => {
-  try {
-    const file = await appendRecord(runtime.globalStoragePath, record);
-
-    logInfo(runtime.output, `recorded ${record.outcome.kind} suggestion to ${file}`);
-  }
-  catch (error) {
-    logError(runtime.output, `could not write a record: ${String(error)}`);
-  }
-};
+const RECORD_WINDOW_LINES = 21;
 
 /**
- * An accepted suggestion is its own resolution. A turned down one is only half a record
- * until the reader shows what they wanted instead, which the watch collects.
+ * A model that autocompletes a secret the reader is typing is worse than no help, so any
+ * answer that carries one is dropped before it reaches the editor or the cache.
  */
-const settle = (runtime: Runtime, pending: PendingRecord, reason: vscode.InlineCompletionEndOfLifeReason): void => {
-  if (pending.record.outcome.kind !== "unresolved") return;
-
-  const record = { ...pending.record, outcome: outcomeOf(reason) };
-
-  pending.record = record;
-
-  if (record.outcome.kind === "accepted") {
-    void writeRecord(runtime, record);
-
-    return;
-  }
-
-  // a watch still open from the previous suggestion writes what it has and steps aside
-  runtime.watcher?.dispose();
-  runtime.watcher = watchResolution(pending.document, record.window, (resolution) => {
-    runtime.watcher = undefined;
-    void writeRecord(runtime, { ...record, resolution });
-  });
-};
-
-const RECORD_WINDOW_LINES = 21;
+const withoutSecrets = (suggestions: Suggestion[]): Suggestion[] =>
+  suggestions.filter(suggestion => suggestion.kind === "format" || !hasSecret(suggestion.text));
 
 export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemProvider => ({
   handleEndOfLifetime: (item, reason) => {
     const pending = runtime.pending.get(item) ?? runtime.lastPending;
     const score = scoreOf(outcomeOf(reason));
 
-    if (score !== undefined) runtime.scores = withScore(runtime.scores, score);
+    // a suggestion hidden by a snooze was in the way of editing, not wrong, so it does
+    // not count against the eagerness
+    if (score !== undefined && !isSnoozed(runtime)) runtime.scores = withScore(runtime.scores, score);
 
     if (reason.kind === vscode.InlineCompletionEndOfLifeReasonKind.Accepted) {
       const accepted = runtime.lastServed?.suggestions.find(held => held.kind === "edit");
@@ -191,7 +150,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     const settings = vscode.workspace.getConfiguration("tablet");
     const isAutomatic = context.triggerKind === vscode.InlineCompletionTriggerKind.Automatic;
 
-    if (isAutomatic && !isAutomaticEnabled(runtime)) return;
+    if (isAutomatic && (!isAutomaticEnabled(runtime) || isSnoozed(runtime))) return;
 
     const active = activeConfig(runtime);
 
@@ -205,10 +164,33 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       return;
     }
 
+    const path = relativePath(document.uri);
+    const text = document.getText();
+
+    // the answer the reader turned down is still in the prompt cache, so the next cursor
+    // rest would bring it straight back. Nothing is offered until the text changes or
+    // the reader asks by hand, which clears the refusal
+    const declined = runtime.declined;
+
+    if (declined !== undefined && declined.path === path && declined.text === text) return;
+
     const isProse = isProseLanguage(settings.get<string[]>("proseLanguages") ?? [], document.languageId);
 
     // prose gets a bounded profile: the model answers a sentence, not a paragraph
     const config = isProse ? proseProfile(active.configuration) : active.configuration;
+
+    // typing what the suggestion on screen proposes, or accepting one of several edits,
+    // leaves the rest of the answer standing, so it is carried over the change instead of
+    // asked for again. Typing anything else asks afresh
+    const shown = runtime.lastServed;
+
+    if (shown !== undefined && shown.path === path && shown.text !== text) {
+      const carried = rebaseSuggestions(shown.suggestions, path, shown.text, text);
+
+      runtime.lastServed = carried.isAgreed && carried.suggestions.length > 0
+        ? { path, text, suggestions: carried.suggestions }
+        : undefined;
+    }
 
     // a jump to an edit moves the cursor, which re-asks this provider. While the document
     // has not changed, the answer has not either, so the held suggestions are re-served
@@ -221,10 +203,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
     // a cursor that has moved further than the window from every remembered edit is
     // looking at something else, and gets a fresh ask
-    if (remembered !== undefined
-      && isNearRemembered
-      && remembered.path === relativePath(document.uri)
-      && remembered.text === document.getText()) {
+    if (remembered !== undefined && isNearRemembered && remembered.path === path && remembered.text === text) {
       const items = await itemsFor(remembered.suggestions.filter(held => held.kind !== "completion"), document, position, config);
 
       if (items.length > 0) {
@@ -240,15 +219,20 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       if (token.isCancellationRequested) return;
     }
 
-    runtime.inFlight?.abort();
+    // the request before this one keeps running past the keystroke that cancelled its
+    // call: its answer may still fit once carried over the typing, the way zed reuses a
+    // late prediction. It is dropped once this call is cancelled in turn, so at most two
+    // requests hold a server slot
+    const previous = runtime.inFlight;
+
+    if (previous !== undefined && previous.path !== path) previous.controller.abort();
 
     const controller = new AbortController();
 
-    runtime.inFlight = controller;
-    token.onCancellationRequested(() => controller.abort());
+    token.onCancellationRequested(() => previous?.controller.abort());
 
     const snapshot = snapshotOf(document, position);
-    const snapshotText = document.getText();
+    const snapshotText = text;
 
     noteFile(runtime, snapshot.path);
 
@@ -288,27 +272,37 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       candidatePaths: runtime.candidatePaths,
     };
 
-    const ask = (): Promise<SuggestResult> => suggest(
-      suggestInput,
+    const request = (prompt: string, signal: AbortSignal): Promise<CompletionResult> => complete({
+      endpoint: config.endpoint,
+      apiKey: key.value,
+      headers: headers.values,
+      model: config.model,
+      prompt,
+      maxTokens: config.maxTokens,
+      temperature: config.temperature,
+      stop: config.stop,
+      extraBody: config.extraBody,
+      timeoutMs: settings.get<number>("requestTimeoutMs") ?? 10_000,
+      signal,
+    });
+
+    const ask = (budget: number): Promise<SuggestResult> => suggest(
+      { ...suggestInput, budget },
       {
         complete: async (prompt) => {
           logInfo(runtime.output, `asking ${config.name}, ${estimateTokens(prompt)} estimated tokens`);
           logDebug(runtime.output, `prompt for ${config.name}:\n${prompt}`);
 
+          // an accept lands on the state that was asked ahead, so the request already
+          // running for it is awaited instead of asked again. Any other prompt means the
+          // reader went elsewhere, and the guess stops holding a server slot
+          const joined = runtime.ahead?.replies.get(prompt);
+
+          if (joined === undefined) runtime.ahead?.controller.abort();
+          else logInfo(runtime.output, `${config.name}: joined the request asked ahead`);
+
           const startedAt = Date.now();
-          const answer = await complete({
-            endpoint: config.endpoint,
-            apiKey: key.value,
-            headers: headers.values,
-            model: config.model,
-            prompt,
-            maxTokens: config.maxTokens,
-            temperature: config.temperature,
-            stop: config.stop,
-            extraBody: config.extraBody,
-            timeoutMs: settings.get<number>("requestTimeoutMs") ?? 10_000,
-            signal: controller.signal,
-          });
+          const answer = await (joined ?? request(prompt, controller.signal));
 
           logDebug(runtime.output, answer.ok
             ? `reply for ${config.name}:\n${answer.texts.join("\n---\n")}`
@@ -332,24 +326,55 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       },
     );
 
-    const first = await ask();
+    const run = async (): Promise<SuggestResult> => {
+      const first = await ask(suggestInput.budget);
 
-    // the endpoint named its real context size in the refusal, so one more ask with the
-    // budget cut to fit is worth more than reporting the refusal
-    if (first.kind === "failure" && first.failure.kind === "context") {
+      if (first.kind !== "failure" || first.failure.kind !== "context") return first;
+
+      // the endpoint named its real context size in the refusal, so one more ask with the
+      // budget cut to fit is worth more than reporting the refusal
       runtime.contextLimit = first.failure.contextSize;
       logInfo(runtime.output, `${config.name}: ${describeFailure(first.failure)}, asking again within ${promptBudget(runtime, config)} tokens`);
+
+      return ask(promptBudget(runtime, config));
+    };
+
+    const running = run();
+
+    runtime.inFlight = { controller, path, text: snapshotText, result: running };
+
+    const carried = previous === undefined || previous.path !== path
+      ? undefined
+      : await carriedFrom(previous, running, path, snapshotText);
+    const late = withoutSecrets(carried ?? []);
+
+    if (late.length > 0 && !token.isCancellationRequested) {
+      // the older answer already fits what is on screen, so the newer request only holds a slot
+      controller.abort();
+      runtime.inFlight = undefined;
+      runtime.lastServed = { path, text: snapshotText, suggestions: late };
+      runtime.lastPending = undefined;
+
+      const items = await itemsFor(late, document, position, config);
+
+      logInfo(runtime.output, `${config.name}: carried ${items.length} suggestion(s) from the answer to the text before the last keystroke`);
+      renderStatus(runtime.status, { kind: "idle", name: config.name, detail: `${items.length} suggestion(s)` }, statusMarks(runtime));
+
+      return items;
     }
 
-    const result = first.kind === "failure" && first.failure.kind === "context" ? await ask() : first;
+    const result = await running;
 
     // the answer was computed from snapshotText: if the document moved on while the
-    // model was thinking, the edits no longer describe what is on screen
+    // model was thinking, the edits no longer describe what is on screen. The request
+    // stays in runtime.inFlight, where the next ask can still carry it over the typing
     if (document.getText() !== snapshotText) {
-      logInfo(runtime.output, `${config.name}: document changed during the request, discarding the answer`);
+      logInfo(runtime.output, `${config.name}: document changed during the request, leaving the answer to the next ask`);
 
       return;
     }
+
+    if (runtime.inFlight?.result === running) runtime.inFlight = undefined;
 
     updateRing(runtime, snapshot);
 
@@ -376,7 +401,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     }
 
     if (result.kind === "none") {
-      const fallback = !isProse && config.format !== "fim" ? await formatFallback(runtime, document, position) : undefined;
+      const fallback = !isProse && config.format !== "fim" ? await formatFallback(document, position) : undefined;
 
       if (fallback !== undefined) {
         runtime.lastServed = { path: snapshot.path, text: snapshotText, suggestions: [{ kind: "format", path: snapshot.path }] };
@@ -392,13 +417,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       return;
     }
 
-    // a model that autocompletes a secret the reader is typing is worse than no help, so
-    // any answer that carries one is dropped before it reaches the editor or the cache
-    const safe = result.suggestions.filter((suggestion) => {
-      if (suggestion.kind === "format") return true;
-
-      return !hasSecret(suggestion.text);
-    });
+    const safe = withoutSecrets(result.suggestions);
 
     runtime.lastServed = { path: snapshot.path, text: snapshotText, suggestions: safe };
 
@@ -412,20 +431,20 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     if (ahead !== undefined) {
       logInfo(runtime.output, `${config.name}: asking ahead as if the first suggestion were accepted`);
 
+      runtime.ahead?.controller.abort();
+
+      const asked = { controller: new AbortController(), replies: new Map<string, Promise<CompletionResult>>() };
+
+      runtime.ahead = asked;
+
       void suggest(ahead, {
-        complete: prompt => complete({
-          endpoint: config.endpoint,
-          apiKey: key.value,
-          headers: headers.values,
-          model: config.model,
-          prompt,
-          maxTokens: config.maxTokens,
-          temperature: config.temperature,
-          stop: config.stop,
-          extraBody: config.extraBody,
-          timeoutMs: settings.get<number>("requestTimeoutMs") ?? 10_000,
-          signal: new AbortController().signal,
-        }),
+        complete: (prompt) => {
+          const reply = request(prompt, asked.controller.signal);
+
+          asked.replies.set(prompt, reply);
+
+          return reply;
+        },
         readFile: readFileLines,
         diagnosticsFor: () => [],
         cache: runtime.cache,

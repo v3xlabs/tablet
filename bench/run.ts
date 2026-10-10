@@ -41,6 +41,12 @@ for (const key of ["windowLines", "contextLines", "maxTokens", "temperature", "c
   if (value !== undefined) overrides[key] = Number(value);
 }
 
+for (const key of ["template", "chunkTemplate", "changeTemplate", "diagnosticTemplate"]) {
+  const value = flagValue(key);
+
+  if (value !== undefined) overrides[key] = value;
+}
+
 const parsed = parseConfigurations({
   eval: {
     endpoint: ENDPOINT,

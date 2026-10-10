@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 
 import type { Config } from "../config";
-import type { Runtime } from "../runtime";
 import { relativePath } from "../runtime";
 import type { Suggestion } from "../suggest";
 import { applyEdits } from "./apply-edits";
@@ -142,13 +141,7 @@ const formatItem = async (document: vscode.TextDocument, cursor: vscode.Position
  * alone. When it has nothing to say and the formatter would change a line the linter is
  * flagging, the formatter offer is made here instead of waiting for the model to make it.
  */
-export const formatFallback = async (runtime: Runtime, document: vscode.TextDocument, cursor: vscode.Position): Promise<vscode.InlineCompletionItem | undefined> => {
-  const declined = runtime.declined;
-
-  if (declined !== undefined && declined.path === relativePath(document.uri) && declined.text === document.getText()) {
-    return undefined;
-  }
-
+export const formatFallback = async (document: vscode.TextDocument, cursor: vscode.Position): Promise<vscode.InlineCompletionItem | undefined> => {
   const flagged = vscode.languages.getDiagnostics(document.uri).map(entry => entry.range.start.line);
 
   if (flagged.length === 0) return undefined;
@@ -174,6 +167,11 @@ export const describeItem = (item: vscode.InlineCompletionItem): string => {
   return `${kind} ${where} ${JSON.stringify(String(item.insertText).slice(0, 60))}`;
 };
 
+/**
+ * The editor cycles through ghost text completions but shows only one inline edit, the
+ * last it was handed. The suggestions arrive best first, so the first inline edit is the
+ * only one handed over, and cycling to another reorders the suggestions instead.
+ */
 export const itemsFor = async (
   suggestions: Suggestion[],
   document: vscode.TextDocument,
@@ -181,6 +179,7 @@ export const itemsFor = async (
   config: Config,
 ): Promise<vscode.InlineCompletionItem[]> => {
   const items: vscode.InlineCompletionItem[] = [];
+  const hasInlineEdit = (): boolean => items.some(item => item.isInlineEdit === true);
 
   for (const suggestion of suggestions) {
     if (suggestion.kind === "completion") {
@@ -189,15 +188,11 @@ export const itemsFor = async (
       continue;
     }
 
-    if (suggestion.kind === "format") {
-      const formatted = await formatItem(document, position);
+    if (hasInlineEdit()) continue;
 
-      if (formatted !== undefined) items.push(formatted);
-
-      continue;
-    }
-
-    const item = await editItem(suggestion, document, config, position);
+    const item = suggestion.kind === "format"
+      ? await formatItem(document, position)
+      : await editItem(suggestion, document, config, position);
 
     if (item !== undefined) items.push(item);
   }
