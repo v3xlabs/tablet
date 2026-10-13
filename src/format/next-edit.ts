@@ -318,6 +318,36 @@ const withoutTrailingBlanks = (lines: string[]): string[] => {
   return lines.slice(0, end);
 };
 
+// window lines a streamed rewrite must repeat before the hunk above is final; fewer
+// let a repeated closing brace finish it early
+const RESYNC_LINES = 3;
+
+/**
+ * Finished once the rewrite has changed a window line and then copied the window's own
+ * lines again: the hunk above is final from there. Only whole lines are read, so a
+ * half-written line never reaches the reader.
+ */
+export const finishedNextEdit = (partial: string, target: EditTarget, cursorMarker = ""): string | undefined => {
+  const cleaned = cursorMarker === "" ? partial : partial.replaceAll(cursorMarker, "");
+  const complete = cleaned.slice(0, Math.max(0, cleaned.lastIndexOf("\n")));
+  const lines = withoutHeader(complete.split("\n"));
+  const window = windowOf(target);
+  let same = 0;
+
+  while (same < lines.length && same < window.length && lines[same] === window[same]) same++;
+
+  const tailStart = lines.length - RESYNC_LINES;
+  const tail = lines.slice(tailStart);
+
+  if (tailStart < same || same === lines.length || tail.every(line => line.trim() === "")) return undefined;
+
+  for (let at = same; at + RESYNC_LINES <= window.length; at++) {
+    if (tail.every((line, index) => window[at + index] === line)) return `${[...lines.slice(0, tailStart), ...window.slice(at)].join("\n")}\n`;
+  }
+
+  return undefined;
+};
+
 export type NextEditReply
   = | { kind: "edits"; edits: WindowEdit[]; }
     | { kind: "format"; }

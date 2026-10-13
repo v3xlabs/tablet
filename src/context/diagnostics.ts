@@ -8,13 +8,17 @@ export type Diagnostic = {
   severity: string;
   source: string | undefined;
   message: string;
+  /** Title of the language server's quick fix, only when the server is sure of one. */
+  fix?: string;
 };
 
 export const describeDiagnostic = (diagnostic: Diagnostic): string => {
   const where = `${diagnostic.line + 1}:${diagnostic.character + 1}`;
   const who = diagnostic.source === undefined ? diagnostic.severity : `${diagnostic.severity} ${diagnostic.source}`;
 
-  return `${where} ${who}: ${firstSentence(diagnostic.message)}`;
+  const fix = diagnostic.fix === undefined ? "" : ` (quick fix: ${diagnostic.fix})`;
+
+  return `${where} ${who}: ${firstSentence(diagnostic.message)}${fix}`;
 };
 
 /**

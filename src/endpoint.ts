@@ -23,6 +23,11 @@ export type CompletionRequest = {
   extraBody: Record<string, unknown>;
   timeoutMs: number;
   signal: AbortSignal;
+  /**
+   * Called with the first choice as it streams. Returning text ends the reply with that text,
+   * without waiting for the rest of the stream.
+   */
+  finish?: (partial: string) => string | undefined;
 };
 
 export const describeFailure = (failure: EndpointFailure): string => {
@@ -136,7 +141,7 @@ export const readCompletionBody = (body: unknown): BodyRead => {
  * Joins server-sent completion chunks into one text per choice. Each `data:` line holds
  * a body shaped like a whole reply, carrying the next piece of each choice it names.
  */
-export const readEventStream = async (body: ReadableStream<Uint8Array>): Promise<BodyRead> => {
+export const readEventStream = async (body: ReadableStream<Uint8Array>, finish?: (partial: string) => string | undefined): Promise<BodyRead> => {
   const texts = new Map<number, string>();
   const decoder = new TextDecoder();
   let held = "";
@@ -176,6 +181,11 @@ export const readEventStream = async (body: ReadableStream<Uint8Array>): Promise
 
       if (read !== undefined) return read;
     }
+
+    // leaving the loop cancels the stream, which closes the connection and frees the slot
+    const finished = finish?.(texts.get(0) ?? "");
+
+    if (finished !== undefined) return { kind: "texts", texts: [finished] };
   }
 
   const last = readLine(held + decoder.decode());
@@ -239,7 +249,7 @@ export const complete = async (request: CompletionRequest): Promise<CompletionRe
 
   try {
     read = isStream && response.body !== null
-      ? await readEventStream(response.body)
+      ? await readEventStream(response.body, request.finish)
       : readCompletionBody(await response.json());
   }
   catch (error) {

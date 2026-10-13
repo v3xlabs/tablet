@@ -53,6 +53,11 @@
         "category": "tablet"
       },
       {
+        "command": "tablet.suggestNow",
+        "title": "Open the suggestions list and ask tablet",
+        "category": "tablet"
+      },
+      {
         "command": "tablet.storeKey",
         "title": "Store a named key",
         "category": "tablet"
@@ -65,6 +70,11 @@
       {
         "command": "tablet.showLog",
         "title": "Show log",
+        "category": "tablet"
+      },
+      {
+        "command": "tablet.showTiming",
+        "title": "Show timing of recent suggestions",
         "category": "tablet"
       },
       {
@@ -109,6 +119,12 @@
         "key": "ctrl+alt+\\",
         "mac": "cmd+alt+\\",
         "when": "editorTextFocus && !editorReadonly"
+      },
+      {
+        "command": "tablet.suggestNow",
+        "key": "ctrl+space",
+        "mac": "ctrl+space",
+        "when": "editorTextFocus && !editorReadonly && !suggestWidgetVisible && !inlineSuggestionVisible && !inlineEditIsVisible"
       },
       {
         "command": "tablet.snooze",
@@ -189,6 +205,16 @@
           "type": "number",
           "default": 150,
           "markdownDescription": "Idle time before an automatic request starts."
+        },
+        "tablet.progressive": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the first finished part of a streamed answer while the model is still writing the rest: the first line of a completion, or the first edit the model has moved past. The whole answer replaces it when it arrives, if the text has not changed."
+        },
+        "tablet.earlyStop": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "End a streamed answer as soon as its first finished part is read, which frees the server sooner but drops any later edits of the same answer."
         },
         "tablet.requestTimeoutMs": {
           "type": "number",

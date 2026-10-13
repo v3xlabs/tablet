@@ -1,6 +1,7 @@
 import { type Diagnostic, renderDiagnostics } from "../context/diagnostics";
 import type { RecentEdit } from "../context/recent-edits";
 import type { Chunk } from "../context/ring-buffer";
+import type { Snapshot } from "../snapshot";
 import { clipLine, fitToBudget } from "./budget";
 import { type AssembledPrompt, renderChunks } from "./fim";
 import type { EditTarget } from "./next-edit";
@@ -277,4 +278,29 @@ export const readZeta = (reply: string, target: EditTarget, cursorMarker: string
   const edits = splitIntoEdits(lines, rebuilt, target.windowStart);
 
   return edits.length === 0 ? { kind: "none" } : { kind: "edits", edits };
+};
+
+/**
+ * Cuts the reply after its last complete tag, so a half-written block or tag never
+ * reaches the reader.
+ */
+export const finishedZeta = (partial: string): string | undefined => {
+  const tags = Array.from(partial.matchAll(MARKER));
+  const first = tags[0];
+  const last = tags.at(-1);
+
+  if (first === undefined || last === undefined || Number(last[1]) <= Number(first[1])) return undefined;
+
+  return partial.slice(0, last.index + last[0].length);
+};
+
+/**
+ * Fill-in-the-middle prompt in the order zeta was trained on: suffix, prefix, then the middle slot.
+ */
+export const assembleContinuation = (snapshot: Snapshot, contextLines: number): string => {
+  const line = snapshot.lines[snapshot.cursorLine] ?? "";
+  const before = [...snapshot.lines.slice(Math.max(0, snapshot.cursorLine - contextLines), snapshot.cursorLine), line.slice(0, snapshot.cursorCharacter)];
+  const after = [line.slice(snapshot.cursorCharacter), ...snapshot.lines.slice(snapshot.cursorLine + 1, snapshot.cursorLine + 1 + Math.floor(contextLines / 3))];
+
+  return `<[fim-suffix]>${after.join("\n")}<[fim-prefix]>${before.join("\n")}<[fim-middle]>`;
 };

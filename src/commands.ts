@@ -3,7 +3,8 @@ import { mkdir } from "node:fs/promises";
 import * as vscode from "vscode";
 
 import { collectRoot, exportRecords } from "./collect/store";
-import { activeConfig, allConfigs, ENABLED_KEY, forgetConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, OVERRIDE_KEY, type Runtime, saveConfig, showActive, storedConfigs, toggleSnooze } from "./runtime";
+import { activeConfig, allConfigs, cancelRequests, ENABLED_KEY, forgetConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, OVERRIDE_KEY, type Runtime, saveConfig, showActive, storedConfigs, toggleSnooze } from "./runtime";
+import { describeTiming } from "./timing";
 
 const FORMATS = [
   { label: "fim", detail: "fill in the middle, completes where the cursor is" },
@@ -236,6 +237,7 @@ const forgetKey = async (runtime: Runtime): Promise<void> => {
 
 const toggleEnabled = async (runtime: Runtime): Promise<void> => {
   await runtime.memento.update(ENABLED_KEY, !isAutomaticEnabled(runtime));
+  cancelRequests(runtime);
   showActive(runtime);
 };
 
@@ -330,20 +332,43 @@ const showMenu = async (runtime: Runtime): Promise<void> => {
   if (picked?.command !== undefined) await vscode.commands.executeCommand(picked.command);
 };
 
+const refreshAfter = async (runtime: Runtime, action: () => Thenable<unknown>): Promise<void> => {
+  await action();
+  showActive(runtime);
+};
+
 export const registerCommands = (runtime: Runtime): vscode.Disposable[] => [
-  vscode.commands.registerCommand("tablet.addConfiguration", () => addConfig(runtime)),
-  vscode.commands.registerCommand("tablet.selectConfiguration", () => pickConfig(runtime)),
-  vscode.commands.registerCommand("tablet.removeConfiguration", () => removeConfig(runtime)),
-  vscode.commands.registerCommand("tablet.clearConfigurationOverride", () => runtime.memento.update(OVERRIDE_KEY, undefined)),
+  vscode.commands.registerCommand("tablet.addConfiguration", () => refreshAfter(runtime, () => addConfig(runtime))),
+  vscode.commands.registerCommand("tablet.selectConfiguration", () => refreshAfter(runtime, () => pickConfig(runtime))),
+  vscode.commands.registerCommand("tablet.removeConfiguration", () => refreshAfter(runtime, () => removeConfig(runtime))),
+  vscode.commands.registerCommand("tablet.clearConfigurationOverride", () => refreshAfter(runtime, () => runtime.memento.update(OVERRIDE_KEY, undefined))),
   vscode.commands.registerCommand("tablet.toggleEnabled", () => toggleEnabled(runtime)),
   vscode.commands.registerCommand("tablet.trigger", () => {
     runtime.declined = undefined;
 
     return vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
   }),
+  // Also bound to the suggestions key, so pressing it asks tablet. package.json binds it only
+  // while no suggestion is visible.
+  vscode.commands.registerCommand("tablet.suggestNow", async () => {
+    runtime.declined = undefined;
+
+    await Promise.all([
+      vscode.commands.executeCommand("editor.action.triggerSuggest"),
+      vscode.commands.executeCommand("editor.action.inlineSuggest.trigger"),
+    ]);
+  }),
   vscode.commands.registerCommand("tablet.storeKey", () => storeKey(runtime)),
   vscode.commands.registerCommand("tablet.forgetKey", () => forgetKey(runtime)),
   vscode.commands.registerCommand("tablet.showLog", () => runtime.output.show(true)),
+  vscode.commands.registerCommand("tablet.showTiming", () => {
+    // Written regardless of log level: the reader asked for this report.
+    runtime.output.appendLine("timing of recent asks, from the keystroke the editor reported:");
+
+    for (const line of describeTiming(runtime.timing)) runtime.output.appendLine(`  ${line}`);
+
+    runtime.output.show(true);
+  }),
   vscode.commands.registerCommand("tablet.menu", () => showMenu(runtime)),
   vscode.commands.registerCommand("tablet.toggleCollect", () => toggleCollect()),
   vscode.commands.registerCommand("tablet.openDataFolder", () => openDataFolder(runtime)),

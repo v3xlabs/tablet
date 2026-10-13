@@ -8,7 +8,7 @@ import { type ChangeTracker, trackChange } from "../src/context/recent-edits";
 import { complete, type CompletionResult } from "../src/endpoint";
 import { applyEdits } from "../src/format/apply-edits";
 import { estimateTokens } from "../src/format/budget";
-import { suggest, type Suggestion, type SuggestResult } from "../src/suggest";
+import { type AskOptions, suggest, type Suggestion, type SuggestResult } from "../src/suggest";
 import type { CaseSpec } from "./generate";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -141,15 +141,19 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
       : { outcome: "wrong-edit", detail: `stalled after ${round} round(s): ${divergence(files, expected)}` };
   }
 
-  const first = result.suggestions[0];
+  const offered = result.suggestions[0];
 
-  if (first === undefined) return { outcome: "no-op", detail: "empty suggestion list" };
+  if (offered === undefined) return { outcome: "no-op", detail: "empty suggestion list" };
+
+  // a completion goes in at the cursor, which is where the editor would put it
+  const cursorLine = Math.min(spec.cursor.line, (files.get(spec.targetPath) ?? "").split("\n").length - 1);
+  const first: Suggestion = offered.kind === "completion"
+    ? { kind: "edit", path: spec.targetPath, startLine: cursorLine, startCharacter: spec.cursor.character, endLine: cursorLine, endCharacter: spec.cursor.character, text: offered.text }
+    : offered;
 
   if (spec.category === "clean" || spec.category === "secret") return { outcome: "false-positive", detail: JSON.stringify(first).slice(0, 160) };
 
   if (first.kind === "format") return spec.allowFormat ? { outcome: "format-pass" } : { outcome: "format-wrong" };
-
-  if (first.kind === "completion") return { outcome: "wrong-edit", detail: "fim completion from a next-edit run" };
 
   // prose has no single right answer: the inserted text has to hold the expected phrase
   // inside the budget, and a rewritten paragraph fails on the budget
@@ -184,7 +188,7 @@ const judgeRound = (spec: CaseSpec, result: SuggestResult, round: number, files:
 
 // the estimate is what the extension trims against, so a prompt over it is a harness
 // fault to report offline, before a request is spent on it
-const askOnce = (prompt: string): Promise<CompletionResult> => {
+const askOnce = (prompt: string, options: AskOptions = {}): Promise<CompletionResult> => {
   const tokens = estimateTokens(prompt);
 
   if (tokens > BUDGET - config.maxTokens) {
@@ -197,9 +201,9 @@ const askOnce = (prompt: string): Promise<CompletionResult> => {
     headers: {},
     model: config.model,
     prompt,
-    maxTokens: config.maxTokens,
+    maxTokens: options.maxTokens ?? config.maxTokens,
     temperature: config.temperature,
-    stop: config.stop,
+    stop: options.stop ?? config.stop,
     extraBody: {},
     timeoutMs: TIMEOUT_MS,
     signal: new AbortController().signal,
@@ -250,13 +254,16 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
     : [];
 
   const dependencies = {
-    complete: async (prompt: string) => {
+    // the bench reads every reply whole, so a streamed finish is not passed on
+    complete: async (prompt: string, options?: AskOptions) => {
+      const bounds = { maxTokens: options?.maxTokens, stop: options?.stop };
+
       requests++;
 
       if (secretLines.some(line => prompt.includes(line))) hasLeaked = true;
 
       for (let attempt = 0; attempt < 8; attempt++) {
-        const answer = await askOnce(prompt);
+        const answer = await askOnce(prompt, bounds);
 
         if (answer.ok || answer.failure.kind !== "status" || answer.failure.status !== 429) return answer;
 
@@ -266,7 +273,7 @@ const runCase = async (caseId: string, sample: number): Promise<Outcome> => {
         await new Promise(resolve => setTimeout(resolve, backoff + jitter));
       }
 
-      return askOnce(prompt);
+      return askOnce(prompt, bounds);
     },
     readFile: async (filePath: string) => files.get(filePath)?.split("\n"),
     diagnosticsFor: (filePath: string) => (IS_NO_DIAGNOSTICS || filePath !== spec.targetPath ? [] : spec.diagnostics),

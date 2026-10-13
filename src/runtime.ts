@@ -4,11 +4,17 @@ import { type Cache, emptyCache } from "./cache";
 import type { CollectedRecord } from "./collect/record";
 import { type Config, isLanguageEnabled, parseConfigurations, type ParseResult, selectActive } from "./config";
 import { type ChangeTracker, emptyTracker } from "./context/recent-edits";
-import { emptyRing, type Ring } from "./context/ring-buffer";
+import { addChunk, chunksAround, emptyRing, type Ring } from "./context/ring-buffer";
 import { delayFactor, type Eagerness, type EagernessSetting, levelOf } from "./eagerness";
-import type { CompletionResult } from "./endpoint";
+import { createDiagnosticTracker, type DiagnosticTracker } from "./editor-diagnostics";
+import { logInfo } from "./logger";
+import { createDefinitionCache, type DefinitionCache } from "./lsp";
+import { createQuickFixes, type QuickFixes } from "./quickfix";
+import { createForegroundRequests, createRequestScheduler, createSharedReplies, type ForegroundRequests, type RequestScheduler, type SharedReplies } from "./requests";
+import type { Snapshot } from "./snapshot";
 import { idleStatus, renderStatus, type StatusMarks } from "./status-bar";
 import type { Suggestion, SuggestResult } from "./suggest";
+import { emptyTiming, type Timing } from "./timing";
 
 export const OVERRIDE_KEY = "activeConfig.override";
 export const ENABLED_KEY = "enabled.override";
@@ -20,18 +26,25 @@ export type Runtime = {
   output: vscode.OutputChannel;
   status: vscode.StatusBarItem;
   isDev: boolean;
+  definitions: DefinitionCache;
+  diagnostics: DiagnosticTracker;
+  quickFixes: QuickFixes;
+  foreground: ForegroundRequests;
+  requests: RequestScheduler;
+  configIdentity: string | undefined;
   ring: Ring;
   tracker: ChangeTracker;
   cache: Cache<Suggestion[]>;
-  lastServed: { path: string; text: string; suggestions: Suggestion[]; } | undefined;
+  lastServed: { path: string; text: string; offset?: number; suggestions: Suggestion[]; } | undefined;
   declined: { path: string; text: string; } | undefined;
   candidatePaths: string[];
   lastPickLine: number;
   lastPickHash: string | undefined;
   /** The latest request, kept past a keystroke so its answer can be carried over the typing. */
-  inFlight: { controller: AbortController; path: string; text: string; result: Promise<SuggestResult>; } | undefined;
-  /** The request asked as if the shown suggestion were accepted, by prompt, so an accept can join it. */
-  ahead: { controller: AbortController; replies: Map<string, Promise<CompletionResult>>; } | undefined;
+  inFlight: Answered & { controller: AbortController; result: Promise<SuggestResult>; } | undefined;
+  landed: Answered & { suggestions: Suggestion[]; } | undefined;
+  ahead: Ahead | undefined;
+  replies: SharedReplies;
   /** Set while automatic suggestions are muted; the timer lifts the mute. */
   snooze: { until: Date; timer: NodeJS.Timeout; } | undefined;
   idleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -42,9 +55,15 @@ export type Runtime = {
   pending: WeakMap<vscode.InlineCompletionItem, PendingRecord>;
   lastPending: PendingRecord | undefined;
   watcher: vscode.Disposable | undefined;
+  longRest: { uri: string; version: number; } | undefined;
   /** Scores of recent suggestion outcomes, newest last, which set the eagerness. */
   scores: number[];
+  timing: Timing;
 };
+
+export type Ahead = { controller: AbortController; path: string; text: string; result: Promise<SuggestResult>; };
+
+export type Answered = { path: string; text: string; offset: number; };
 
 export type PendingRecord = {
   record: CollectedRecord;
@@ -53,13 +72,23 @@ export type PendingRecord = {
 
 export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
   const ringSettings = vscode.workspace.getConfiguration("tablet").get<Record<string, number>>("ringBuffer") ?? {};
+  const output = vscode.window.createOutputChannel("tablet");
+  const diagnostics = createDiagnosticTracker();
+  const requests = createRequestScheduler(message => logInfo(output, message));
 
   return {
     memento: context.globalState,
     secrets: context.secrets,
-    output: vscode.window.createOutputChannel("tablet"),
+    output,
     status: vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100),
     isDev: context.extensionMode === vscode.ExtensionMode.Development,
+    definitions: createDefinitionCache(),
+    diagnostics,
+    quickFixes: createQuickFixes(diagnostics.isFresh),
+    foreground: createForegroundRequests(),
+    requests,
+    replies: createSharedReplies(requests),
+    configIdentity: undefined,
     ring: emptyRing(ringSettings["chunks"] ?? 16),
     tracker: emptyTracker(8),
     cache: emptyCache<Suggestion[]>(32),
@@ -69,6 +98,8 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     lastPickLine: -9999,
     lastPickHash: undefined,
     inFlight: undefined,
+    landed: undefined,
+    longRest: undefined,
     ahead: undefined,
     snooze: undefined,
     idleTimer: undefined,
@@ -78,6 +109,7 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     lastPending: undefined,
     watcher: undefined,
     scores: [],
+    timing: emptyTiming(200),
   };
 };
 
@@ -168,8 +200,32 @@ export const statusMarks = (runtime: Runtime): StatusMarks => ({
   eagerness: eagernessOf(runtime),
 });
 
+export const cancelRequests = (runtime: Runtime): void => {
+  runtime.foreground.reset();
+  runtime.requests.reset();
+  runtime.inFlight?.controller.abort();
+  runtime.ahead?.controller.abort();
+  runtime.inFlight = undefined;
+  runtime.ahead = undefined;
+};
+
+export const syncConfig = (runtime: Runtime, active: Active): void => {
+  const identity = JSON.stringify(active.configuration);
+
+  if (identity === runtime.configIdentity) return;
+
+  cancelRequests(runtime);
+  runtime.configIdentity = identity;
+  runtime.cache = emptyCache<Suggestion[]>(32);
+  runtime.lastServed = undefined;
+  runtime.landed = undefined;
+  runtime.contextLimit = undefined;
+};
+
 export const showActive = (runtime: Runtime): void => {
   const active = activeConfig(runtime);
+
+  syncConfig(runtime, active);
 
   if (active.configuration === undefined) {
     renderStatus(runtime.status, idleStatus(active.names, active.problems), statusMarks(runtime));
@@ -181,6 +237,19 @@ export const showActive = (runtime: Runtime): void => {
 };
 
 const IDLE_TRIGGER_MS = 400;
+const LONG_REST_FACTOR = 3;
+
+const restMs = (runtime: Runtime): number => {
+  const idleMs = vscode.workspace.getConfiguration("tablet").get<number>("idleTriggerMs") ?? IDLE_TRIGGER_MS;
+
+  return scaledDelay(runtime, idleMs > 0 ? idleMs : IDLE_TRIGGER_MS);
+};
+
+export const typingLine = (runtime: Runtime, document: vscode.TextDocument, cursorLine: number, isAutomatic: boolean): number | undefined => {
+  const last = runtime.diagnostics.lastEdit(document);
+
+  return isAutomatic && last?.line === cursorLine && last.ms < restMs(runtime) ? cursorLine : undefined;
+};
 
 /**
  * The editor asks for inline suggestions when the document changes, never when the cursor
@@ -204,10 +273,24 @@ export const scheduleIdleTrigger = (runtime: Runtime, editor: vscode.TextEditor 
 
   if (idleMs <= 0) return;
 
-  runtime.idleTimer = setTimeout(
-    () => void vscode.commands.executeCommand("editor.action.inlineSuggest.trigger"),
-    scaledDelay(runtime, idleMs),
-  );
+  const delayMs = scaledDelay(runtime, idleMs);
+  const document = editor.document;
+
+  const retry = (): void => {
+    runtime.idleTimer = undefined;
+
+    const served = runtime.lastServed;
+
+    if (served !== undefined && served.path === relativePath(document.uri) && served.text === document.getText()) return;
+
+    runtime.longRest = { uri: document.uri.toString(), version: document.version };
+    void vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
+  };
+
+  runtime.idleTimer = setTimeout(() => {
+    runtime.idleTimer = setTimeout(retry, delayMs * LONG_REST_FACTOR);
+    void vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
+  }, delayMs);
 };
 
 export const cancelIdleTrigger = (runtime: Runtime): void => {
@@ -241,8 +324,38 @@ export const toggleSnooze = async (runtime: Runtime): Promise<void> => {
   };
 
   cancelIdleTrigger(runtime);
-  runtime.inFlight?.controller.abort();
-  runtime.ahead?.controller.abort();
+  cancelRequests(runtime);
   showActive(runtime);
   await vscode.commands.executeCommand("editor.action.inlineSuggest.hide");
+};
+
+const MOVED_FAR_ENOUGH_TO_PICK = 32;
+
+export const updateRing = (runtime: Runtime, snapshot: Snapshot): void => {
+  const hash = snapshot.lines.join("\n");
+  const hasMovedEnough = Math.abs(snapshot.cursorLine - runtime.lastPickLine) > MOVED_FAR_ENOUGH_TO_PICK;
+  const hasContentChanged = runtime.lastPickHash !== hash;
+
+  if (!hasMovedEnough && !hasContentChanged) return;
+
+  const settings = vscode.workspace.getConfiguration("tablet").get<Record<string, number>>("ringBuffer") ?? {};
+  const picked = chunksAround(
+    snapshot.path,
+    snapshot.lines,
+    snapshot.cursorLine,
+    settings["scopeLines"] ?? 150,
+    settings["chunkLines"] ?? 16,
+  );
+
+  runtime.ring = picked.reduce(addChunk, runtime.ring);
+  runtime.lastPickLine = snapshot.cursorLine;
+  runtime.lastPickHash = hash;
+};
+
+export const noteLanded = async (runtime: Runtime, answered: Answered, running: Promise<SuggestResult>): Promise<void> => {
+  const result = await running;
+  const declined = runtime.declined;
+  const isDeclined = declined !== undefined && declined.path === answered.path && declined.text === answered.text;
+
+  if (!isDeclined && result.kind === "suggestions") runtime.landed = { ...answered, suggestions: result.suggestions };
 };

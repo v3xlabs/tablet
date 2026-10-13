@@ -77,12 +77,16 @@ export type Carried = {
 /**
  * Carries suggestions made for one text of a file over to a later text of the same file.
  * An edit in another file is untouched by typing here and stays as it was. A completion
- * is tied to the cursor it was made for, and a formatter offer is worked out again from
- * the text it would format, so neither is carried.
+ * is carried only when its start was typed at `anchor`, an offset into `before`. A
+ * formatter offer is worked out again from the text it would format, so it is never carried.
  */
-export const rebaseSuggestions = (suggestions: Suggestion[], path: string, before: string, after: string): Carried => {
+export const rebaseSuggestions = (suggestions: Suggestion[], path: string, before: string, after: string, anchor?: number): Carried => {
   const beforeText = before.replaceAll("\r\n", "\n");
   const afterText = after.replaceAll("\r\n", "\n");
+
+  // unchanged text (an undo, a cursor rest): its edits still hold, its completions do not
+  if (beforeText === afterText) return { suggestions: suggestions.filter(suggestion => suggestion.kind === "edit"), isAgreed: true };
+
   const user = changeBetween(beforeText, afterText);
   const beforeStarts = lineStarts(beforeText);
   const afterStarts = lineStarts(afterText);
@@ -90,6 +94,17 @@ export const rebaseSuggestions = (suggestions: Suggestion[], path: string, befor
   let isAgreed = false;
 
   for (const suggestion of suggestions) {
+    if (suggestion.kind === "completion") {
+      const isTypedAtAnchor = user.start === anchor && user.end === anchor && user.text !== "";
+
+      if (isTypedAtAnchor && suggestion.text.startsWith(user.text) && suggestion.text !== user.text) {
+        rebased.push({ kind: "completion", text: suggestion.text.slice(user.text.length) });
+        isAgreed = true;
+      }
+
+      continue;
+    }
+
     if (suggestion.kind !== "edit") continue;
 
     if (suggestion.path !== path) {
@@ -139,7 +154,7 @@ const settled = async (isPrevious: boolean, result: Promise<SuggestResult>): Pro
  * for the request asked now.
  */
 export const carriedFrom = async (
-  previous: { text: string; result: Promise<SuggestResult>; },
+  previous: { text: string; offset: number; result: Promise<SuggestResult>; },
   running: Promise<SuggestResult>,
   path: string,
   text: string,
@@ -148,7 +163,7 @@ export const carriedFrom = async (
 
   if (!first.isPrevious || first.result.kind !== "suggestions") return undefined;
 
-  const carried = rebaseSuggestions(first.result.suggestions, path, previous.text, text);
+  const carried = rebaseSuggestions(first.result.suggestions, path, previous.text, text, previous.offset);
 
   return carried.isAgreed && carried.suggestions.length > 0 ? carried.suggestions : undefined;
 };

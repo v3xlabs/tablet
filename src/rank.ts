@@ -42,14 +42,18 @@ export type Derived = {
   requiresFormatter: boolean;
 };
 
-/** The repairs the extension works out for itself from the window, the changes, and the diagnostics. */
-export const derivedRepairs = (target: EditTarget, changes: RecentEdit[], diagnostics: Diagnostic[]): Derived => {
+/**
+ * No edit spans `typingLine`, and no formatter is offered while a line is being typed:
+ * the statement on that line is not finished.
+ */
+export const derivedRepairs = (target: EditTarget, changes: RecentEdit[], diagnostics: Diagnostic[], typingLine?: number): Derived => {
   const repair = whitespaceRepairFor(target, diagnostics);
-  const edits = uniqueBy([...renameSpreadFor(target, changes), ...repair.edits], item => JSON.stringify(item));
+  const edits = uniqueBy([...renameSpreadFor(target, changes), ...repair.edits], item => JSON.stringify(item))
+    .filter(edit => typingLine === undefined || edit.kind !== "edit" || edit.startLine > typingLine || edit.endLine < typingLine);
 
   return {
     edits: orderedByRelevance(edits, target, diagnostics),
-    requiresFormatter: repair.requiresFormatter,
+    requiresFormatter: typingLine === undefined && repair.requiresFormatter,
   };
 };
 

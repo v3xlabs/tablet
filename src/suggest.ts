@@ -9,7 +9,7 @@ import { isSecretPath, redactSecrets } from "./context/sanitize";
 import type { CompletionResult, EndpointFailure } from "./endpoint";
 import { assembleFim } from "./format/fim";
 import { filterCompletion } from "./format/fim-filter";
-import { assembleNextEdit, type EditTarget, readNextEdit } from "./format/next-edit";
+import { assembleNextEdit, type EditTarget, finishedNextEdit, readNextEdit } from "./format/next-edit";
 import { derivedRepairs, modelFirst, orderedByRelevance, uniqueBy } from "./rank";
 import { lineSuffixOf, type Snapshot, windowAround } from "./snapshot";
 import { diagnosticTarget, localTarget } from "./targets";
@@ -19,10 +19,18 @@ export type Suggestion
     | { kind: "edit"; path: string; startLine: number; startCharacter: number; endLine: number; endCharacter: number; text: string; }
     | { kind: "format"; path: string; };
 
+export type Finish = (partial: string) => string | undefined;
+
+/** Overrides the configuration for one ask. `finish` may end a streamed reply early. */
+export type AskOptions = { finish?: Finish; maxTokens?: number | undefined; stop?: string[] | undefined; };
+
 export type SuggestDependencies = {
-  complete: (prompt: string) => Promise<CompletionResult>;
+  complete: (prompt: string, options?: AskOptions) => Promise<CompletionResult>;
+  /** Called with the suggestions of a streamed reply's first final part, before the answer completes. */
+  onPartial?: (suggestions: Suggestion[]) => void;
   readFile: (path: string) => Promise<string[] | undefined>;
-  diagnosticsFor: (path: string) => Diagnostic[];
+  /** Diagnostics of a file, ranked by distance from the given line. */
+  diagnosticsFor: (path: string, nearLine: number) => Diagnostic[];
   cache: Cache<Suggestion[]>;
 };
 
@@ -37,6 +45,9 @@ export type SuggestInput = {
   repo: string;
   previousByPath: ReadonlyMap<string, string[]>;
   candidatePaths: string[];
+  /** Line the reader is typing on; no repair may target it yet. */
+  typingLine?: number;
+  isProse?: boolean;
 };
 
 export type SuggestResult
@@ -75,6 +86,20 @@ const editsFrom = (texts: string[], target: EditTarget, formatMarker: string, cu
   return uniqueBy(edits, edit => JSON.stringify(edit));
 };
 
+/**
+ * Ends a streamed reply early only once its reading proposes a suggestion, and reports that to `onPartial`.
+ */
+export const streamedFinish = (dependencies: SuggestDependencies, finish: Finish, read: (reply: string) => Suggestion[]): Finish => (partial) => {
+  const finished = finish(partial);
+  const suggestions = finished === undefined ? [] : read(finished);
+
+  if (suggestions.length === 0) return;
+
+  dependencies.onPartial?.(suggestions);
+
+  return finished;
+};
+
 const askFim = async (input: SuggestInput, dependencies: SuggestDependencies): Promise<SuggestResult> => {
   const { configuration: config, snapshot } = input;
 
@@ -97,20 +122,26 @@ const askFim = async (input: SuggestInput, dependencies: SuggestDependencies): P
 
   if (cached !== undefined) return { kind: "suggestions", suggestions: cached };
 
-  const answer = await dependencies.complete(assembled.prompt);
-
-  if (!answer.ok) return { kind: "failure", failure: answer.failure };
-
   const lineSuffix = lineSuffixOf(snapshot);
   const followingLines = snapshot.lines.slice(snapshot.cursorLine + 1, snapshot.cursorLine + 8);
-
-  const suggestions = uniqueBy(
-    answer.texts
+  const read = (texts: string[]): Suggestion[] => uniqueBy(
+    texts
       .map(completion => filterCompletion({ completion, lineSuffix, followingLines }))
       .filter((text): text is string => text !== undefined)
       .map((text): Suggestion => ({ kind: "completion", text })),
     suggestion => (suggestion.kind === "completion" ? suggestion.text : ""),
   );
+  const firstLine: Finish = (partial) => {
+    const newline = partial.indexOf("\n");
+
+    return newline > 0 ? partial.slice(0, newline) : undefined;
+  };
+
+  const answer = await dependencies.complete(assembled.prompt, { finish: streamedFinish(dependencies, firstLine, reply => read([reply])) });
+
+  if (!answer.ok) return { kind: "failure", failure: answer.failure };
+
+  const suggestions = read(answer.texts);
 
   if (suggestions.length === 0) return { kind: "none", reason: "every completion was discarded as unusable" };
 
@@ -128,8 +159,10 @@ const askNextEditFor = async (
 
   if (config.format !== "next-edit") return { kind: "none", reason: "the active configuration is for the other format" };
 
-  const diagnostics = target.path === input.snapshot.path ? input.diagnostics : dependencies.diagnosticsFor(target.path);
-  const derived = derivedRepairs(target, input.changes, diagnostics);
+  const diagnostics = target.path === input.snapshot.path
+    ? input.diagnostics
+    : dependencies.diagnosticsFor(target.path, target.cursor?.line ?? Math.floor((target.windowStart + target.windowEnd) / 2));
+  const derived = derivedRepairs(target, input.changes, diagnostics, target.path === input.snapshot.path ? input.typingLine : undefined);
 
   const assembled = assembleNextEdit({
     template: config.template,
@@ -157,7 +190,9 @@ const askNextEditFor = async (
       : { kind: "suggestions", suggestions: cached };
   }
 
-  const answer = await dependencies.complete(assembled.prompt);
+  const read = (texts: string[]): Suggestion[] => orderedByRelevance(editsFrom(texts, target, config.formatMarker, config.cursorMarker), target, diagnostics);
+  const finish = streamedFinish(dependencies, partial => finishedNextEdit(partial, target, config.cursorMarker), reply => read([reply]));
+  const answer = await dependencies.complete(assembled.prompt, { finish });
 
   // the formatter is the last thing offered, never the first: it rewrites the whole file,
   // so anything more precise, from the model or from the window, outranks it
@@ -169,7 +204,7 @@ const askNextEditFor = async (
 
   if (!answer.ok) return withoutModel() ?? { kind: "failure", failure: answer.failure };
 
-  const modelEdits = orderedByRelevance(editsFrom(answer.texts, target, config.formatMarker, config.cursorMarker), target, diagnostics);
+  const modelEdits = read(answer.texts);
 
   if (modelEdits.length === 0) {
     const fallback = withoutModel();
@@ -179,7 +214,8 @@ const askNextEditFor = async (
 
   const suggestions = modelFirst(modelEdits, derived.edits, target, diagnostics);
 
-  writeCache(dependencies.cache, assembled.prompt, suggestions);
+  // Prose with no suggestions is not cached, so the next rest asks again.
+  if (suggestions.length > 0 || input.isProse !== true) writeCache(dependencies.cache, assembled.prompt, suggestions);
 
   return suggestions.length === 0
     ? { kind: "none", reason: `the model returned ${target.path} unchanged` }
@@ -259,8 +295,9 @@ const askNextEdit = async (input: SuggestInput, dependencies: SuggestDependencie
 
       const lines = read.map(line => redactSecrets(line));
       const focus = focusLine(lines, input.changes);
-      const flagged = dependencies.diagnosticsFor(path)[0]?.line;
-      const span = windowAround(lines.length, focus === 0 ? flagged ?? 0 : focus, config.windowLines);
+      const flagged = dependencies.diagnosticsFor(path, focus);
+      const worst = flagged.find(diagnostic => diagnostic.severity === "error") ?? flagged[0];
+      const span = windowAround(lines.length, focus === 0 ? worst?.line ?? 0 : focus, config.windowLines);
 
       return askNextEditFor(withContext, dependencies, {
         path,
