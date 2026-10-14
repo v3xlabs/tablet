@@ -29,10 +29,22 @@ const cutAtExistingCode = (lines: string[], followingLines: string[]): string[] 
   return collision === -1 ? lines : lines.slice(0, collision);
 };
 
+/**
+ * Editors auto-close quotes and brackets, so the line suffix is often a closer the model
+ * types again before going on past it; only the text up to that point is new.
+ */
+const cutAtLineSuffix = (completion: string, lineSuffix: string): string => {
+  const closer = lineSuffix.trim();
+
+  if (closer === "") return completion;
+
+  const index = completion.lastIndexOf(closer);
+
+  return index === -1 ? completion : completion.slice(0, index);
+};
+
 export const filterCompletion = ({ completion, lineSuffix, followingLines }: FilterInput): string | undefined => {
-  const withoutOverlap = lineSuffix !== "" && completion.endsWith(lineSuffix)
-    ? completion.slice(0, completion.length - lineSuffix.length)
-    : completion;
+  const withoutOverlap = cutAtLineSuffix(completion, lineSuffix);
 
   const lines = cutAtExistingCode(trimTrailingBlankLines(withoutOverlap.split("\n")), followingLines);
   const text = trimTrailingBlankLines(lines).join("\n");

@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import * as vscode from "vscode";
 
 import { collectRoot, exportRecords } from "./collect/store";
+import { EAGERNESS_SETTINGS } from "./eagerness";
 import { activeConfig, allConfigs, cancelRequests, ENABLED_KEY, forgetConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, OVERRIDE_KEY, type Runtime, saveConfig, showActive, storedConfigs, toggleSnooze } from "./runtime";
 import { describeTiming } from "./timing";
 
@@ -253,6 +254,20 @@ const toggleCollect = async (): Promise<void> => {
   await vscode.workspace.getConfiguration("tablet").update("collect", !isCollectEnabled(), target);
 };
 
+/** Written where the value is defined now, so a workspace value never shadows the choice. */
+const setEagerness = async (level: unknown): Promise<void> => {
+  const setting = EAGERNESS_SETTINGS.find(held => held === level);
+
+  if (setting === undefined) return;
+
+  const settings = vscode.workspace.getConfiguration("tablet");
+  const target = settings.inspect("eagerness")?.workspaceValue === undefined
+    ? vscode.ConfigurationTarget.Global
+    : vscode.ConfigurationTarget.Workspace;
+
+  await settings.update("eagerness", setting, target);
+};
+
 const openDataFolder = async (runtime: Runtime): Promise<void> => {
   const root = collectRoot(runtime.globalStoragePath);
 
@@ -342,6 +357,7 @@ export const registerCommands = (runtime: Runtime): vscode.Disposable[] => [
   vscode.commands.registerCommand("tablet.selectConfiguration", () => refreshAfter(runtime, () => pickConfig(runtime))),
   vscode.commands.registerCommand("tablet.removeConfiguration", () => refreshAfter(runtime, () => removeConfig(runtime))),
   vscode.commands.registerCommand("tablet.clearConfigurationOverride", () => refreshAfter(runtime, () => runtime.memento.update(OVERRIDE_KEY, undefined))),
+  vscode.commands.registerCommand("tablet.setEagerness", (level: unknown) => setEagerness(level)),
   vscode.commands.registerCommand("tablet.toggleEnabled", () => toggleEnabled(runtime)),
   vscode.commands.registerCommand("tablet.trigger", () => {
     runtime.declined = undefined;

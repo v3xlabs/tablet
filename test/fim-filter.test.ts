@@ -25,4 +25,12 @@ describe("filterCompletion", () => {
   it("drops a completion that only repeats the line suffix", () => {
     expect(filter(");", ");")).toBeUndefined();
   });
+
+  it.each([
+    ["m\";", "\"", "m"],
+    ["\";", "\"", undefined],
+    [" dolor sit amet\");", "\")", " dolor sit amet"],
+  ])("keeps only the text before an auto-closed suffix the completion types again: %j", (completion, lineSuffix, expected) => {
+    expect(filter(completion, lineSuffix)).toBe(expected);
+  });
 });

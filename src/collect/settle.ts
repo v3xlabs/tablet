@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 import { logError, logInfo } from "../logger";
-import type { PendingRecord, Runtime } from "../runtime";
+import { type PendingRecord, refreshStatus, type Runtime } from "../runtime";
 import { type Snapshot, windowAround } from "../snapshot";
 import type { CollectedRecord, Outcome } from "./record";
 import { appendRecord } from "./store";
@@ -25,6 +25,9 @@ const writeRecord = async (runtime: Runtime, record: CollectedRecord): Promise<v
   try {
     const file = await appendRecord(runtime.globalStoragePath, record);
 
+    if (runtime.recordCount !== undefined) runtime.recordCount++;
+
+    refreshStatus(runtime);
     logInfo(runtime.output, `recorded ${record.outcome.kind} suggestion to ${file}`);
   }
   catch (error) {

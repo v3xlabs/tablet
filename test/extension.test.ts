@@ -30,6 +30,8 @@ vi.mock("vscode", () => ({
     get activeTextEditor() { return state.activeEditor; },
     createOutputChannel: () => ({ appendLine: vi.fn(), dispose: vi.fn() }),
     createStatusBarItem: () => ({ show: vi.fn(), dispose: vi.fn() }),
+    activeColorTheme: { kind: 2 },
+    onDidChangeActiveColorTheme: state.ignored,
     onDidChangeActiveTextEditor: state.ignored,
     onDidChangeTextEditorSelection: state.ignored,
   },
@@ -38,6 +40,8 @@ vi.mock("vscode", () => ({
   StatusBarAlignment: { Right: 1 },
   ExtensionMode: { Development: 1 },
   ThemeColor: class {},
+  ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
+  MarkdownString: class {},
   Disposable: class {
     constructor(private readonly cleanup: () => void) {}
     dispose(): void { this.cleanup(); }
@@ -89,7 +93,7 @@ describe("a rest after typing", () => {
 
     const runtime = vi.mocked(createProvider).mock.calls.at(-1)?.[0];
 
-    if (runtime !== undefined && isShown) runtime.lastServed = { path: "source.ts", text: "computeTotal()", suggestions: [] };
+    if (runtime !== undefined && isShown) runtime.lastServed = { kind: "edit", path: "source.ts", text: "computeTotal()", suggestions: [] };
 
     for (const listener of state.changeListeners) listener({ document, contentChanges: [] } as unknown as vscode.TextDocumentChangeEvent);
     await vi.advanceTimersByTimeAsync(60_000);

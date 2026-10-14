@@ -45,6 +45,19 @@ const jsonlFilesUnder = async (folder: string): Promise<string[]> => {
   return found.toSorted((left, right) => left.localeCompare(right));
 };
 
+export const countRecords = async (globalStoragePath: string): Promise<number> => {
+  const files = await jsonlFilesUnder(collectRoot(globalStoragePath));
+  let count = 0;
+
+  for (const file of files) {
+    const text = await readFile(file, "utf8");
+
+    count += text.split("\n").filter(line => line !== "").length;
+  }
+
+  return count;
+};
+
 /** Concatenates every day file into one, which is the hand-off shape: one file, one record per line. */
 export const exportRecords = async (globalStoragePath: string, timestamp: string): Promise<{ file: string; count: number; }> => {
   const root = collectRoot(globalStoragePath);

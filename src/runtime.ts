@@ -12,13 +12,18 @@ import { createDefinitionCache, type DefinitionCache } from "./lsp";
 import { createQuickFixes, type QuickFixes } from "./quickfix";
 import { createForegroundRequests, createRequestScheduler, createSharedReplies, type ForegroundRequests, type RequestScheduler, type SharedReplies } from "./requests";
 import type { Snapshot } from "./snapshot";
-import { idleStatus, renderStatus, type StatusMarks } from "./status-bar";
+import { idleStatus, renderStatus, type StatusState, type StatusView } from "./status-bar";
 import type { Suggestion, SuggestResult } from "./suggest";
-import { emptyTiming, type Timing } from "./timing";
+import { emptyTiming, percentile, type Timing, usageSeries } from "./timing";
 
 export const OVERRIDE_KEY = "activeConfig.override";
 export const ENABLED_KEY = "enabled.override";
 export const STORED_KEY = "configurations";
+
+/** A completion only fits the cursor it was asked at, so a list that may hold one keeps that offset. */
+type Served
+  = | { kind: "completion"; path: string; text: string; offset: number; suggestions: Suggestion[]; }
+    | { kind: "edit"; path: string; text: string; suggestions: Suggestion[]; };
 
 export type Runtime = {
   memento: vscode.Memento;
@@ -35,7 +40,7 @@ export type Runtime = {
   ring: Ring;
   tracker: ChangeTracker;
   cache: Cache<Suggestion[]>;
-  lastServed: { path: string; text: string; offset?: number; suggestions: Suggestion[]; } | undefined;
+  lastServed: Served | undefined;
   declined: { path: string; text: string; } | undefined;
   candidatePaths: string[];
   lastPickLine: number;
@@ -59,6 +64,10 @@ export type Runtime = {
   /** Scores of recent suggestion outcomes, newest last, which set the eagerness. */
   scores: number[];
   timing: Timing;
+  /** What the status bar last said, kept so the hover can redraw on its own. */
+  statusState: StatusState;
+  /** Lines in the collected record files, once counted at activation. */
+  recordCount: number | undefined;
 };
 
 export type Ahead = { controller: AbortController; path: string; text: string; result: Promise<SuggestResult>; };
@@ -110,6 +119,8 @@ export const createRuntime = (context: vscode.ExtensionContext): Runtime => {
     watcher: undefined,
     scores: [],
     timing: emptyTiming(200),
+    statusState: { kind: "unconfigured", detail: "" },
+    recordCount: undefined,
   };
 };
 
@@ -192,13 +203,43 @@ export const scaledDelay = (runtime: Runtime, ms: number): number => Math.round(
 
 export const isSnoozed = (runtime: Runtime): boolean => runtime.snooze !== undefined;
 
-export const statusMarks = (runtime: Runtime): StatusMarks => ({
-  isDevelopment: runtime.isDev,
-  isPaused: !isAutomaticEnabled(runtime),
-  snoozedUntil: runtime.snooze?.until,
-  isCollecting: isCollectEnabled(),
-  eagerness: eagernessOf(runtime),
-});
+const USAGE_MINUTES = 30;
+
+const statusView = (runtime: Runtime): StatusView => {
+  const eagernessSetting = vscode.workspace.getConfiguration("tablet").get<EagernessSetting>("eagerness") ?? "auto";
+  const { counts, samples, accepted, minutes } = runtime.timing;
+
+  return {
+    state: runtime.statusState,
+    marks: {
+      isDevelopment: runtime.isDev,
+      isPaused: !isAutomaticEnabled(runtime),
+      snoozedUntil: runtime.snooze?.until,
+      isCollecting: isCollectEnabled(),
+      eagerness: levelOf(runtime.scores, eagernessSetting),
+    },
+    eagernessSetting,
+    usage: usageSeries(minutes, Date.now(), USAGE_MINUTES),
+    latency: { p50: percentile(samples.total, 0.5), p95: percentile(samples.total, 0.95) },
+    counts: {
+      shown: counts.asked + counts.joined + counts.cached + counts.reserved + counts.carried + counts.quickfix,
+      accepted,
+      carried: counts.carried,
+      quickfix: counts.quickfix,
+    },
+    recordCount: runtime.recordCount,
+  };
+};
+
+/** Redraws the status bar item and its hover from what the runtime holds now. */
+export const refreshStatus = (runtime: Runtime): void => {
+  renderStatus(runtime.status, statusView(runtime));
+};
+
+export const setStatus = (runtime: Runtime, state: StatusState): void => {
+  runtime.statusState = state;
+  refreshStatus(runtime);
+};
 
 export const cancelRequests = (runtime: Runtime): void => {
   runtime.foreground.reset();
@@ -228,12 +269,12 @@ export const showActive = (runtime: Runtime): void => {
   syncConfig(runtime, active);
 
   if (active.configuration === undefined) {
-    renderStatus(runtime.status, idleStatus(active.names, active.problems), statusMarks(runtime));
+    setStatus(runtime, idleStatus(active.names, active.problems));
 
     return;
   }
 
-  renderStatus(runtime.status, { kind: "idle", name: active.configuration.name, detail: "" }, statusMarks(runtime));
+  setStatus(runtime, { kind: "idle", name: active.configuration.name, detail: "" });
 };
 
 const IDLE_TRIGGER_MS = 400;

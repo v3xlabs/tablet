@@ -12,11 +12,11 @@ import { describeItem, formatFallback, itemsFor } from "./format/inline-items";
 import { logError, logInfo } from "./logger";
 import { type QuickFix, rankedWithFixes, withFixTitles } from "./quickfix";
 import { carriedFrom, rebaseSuggestions } from "./rebase";
-import { activeConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, noteFile, noteLanded, promptBudget, relativePath, type Runtime, scaledDelay, statusMarks, syncConfig, typingLine, updateRing } from "./runtime";
+import { activeConfig, isAutomaticEnabled, isCollectEnabled, isSnoozed, noteFile, noteLanded, promptBudget, refreshStatus, relativePath, type Runtime, scaledDelay, setStatus, syncConfig, typingLine, updateRing } from "./runtime";
 import { parseSecretSpec, resolveAll, resolveSecret, type SecretSource } from "./secret";
 import { type Snapshot } from "./snapshot";
 import { speculativeInput } from "./speculate";
-import { idleStatus, renderStatus } from "./status-bar";
+import { idleStatus } from "./status-bar";
 import { type SuggestInput, type Suggestion } from "./suggest";
 import { finishAsk, startAsk } from "./timing";
 
@@ -46,8 +46,12 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     if (reason.kind === vscode.InlineCompletionEndOfLifeReasonKind.Accepted) {
       const accepted = runtime.lastServed?.suggestions.find(held => held.kind === "edit");
 
+      runtime.timing.accepted++;
+
       if (accepted?.kind === "edit") notePrediction(runtime.tracker, accepted.path, accepted.text);
     }
+
+    refreshStatus(runtime);
 
     if (pending !== undefined) settle(runtime, pending, reason);
 
@@ -75,7 +79,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
     syncConfig(runtime, active);
 
     if (active.configuration === undefined) {
-      renderStatus(runtime.status, idleStatus(active.names, active.problems), statusMarks(runtime));
+      setStatus(runtime, idleStatus(active.names, active.problems));
 
       return;
     }
@@ -121,7 +125,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
         const carried = rebaseSuggestions(shown.suggestions, path, shown.text, text);
 
         runtime.lastServed = carried.isAgreed && carried.suggestions.length > 0
-          ? { path, text, suggestions: carried.suggestions }
+          ? { kind: "edit", path, text, suggestions: carried.suggestions }
           : undefined;
       }
 
@@ -137,7 +141,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
       const remembered = runtime.lastServed;
       const reach = config.format === "fim" ? 0 : config.windowLines;
-      const reservable = remembered?.suggestions.filter(held => (held.kind === "completion" ? remembered.offset === offset : true)) ?? [];
+      const reservable = remembered?.suggestions.filter(held => (held.kind === "completion" ? remembered.kind === "completion" && remembered.offset === offset : true)) ?? [];
       const isNearRemembered = reservable.some(held =>
         held.kind === "completion" || (held.kind === "edit" && Math.abs(held.startLine - position.line) <= reach));
 
@@ -149,15 +153,17 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
         if (items.length > 0) {
           logInfo(runtime.output, `${config.name}: re-served ${items.length} remembered suggestion(s)`);
           finishAsk(runtime.timing, clock, "reserved");
+          refreshStatus(runtime);
 
           return items;
         }
       }
 
       const landed = runtime.landed;
-      const rebasedLanded = landed === undefined || landed.path !== path || landed.text === text
+      // at another cursor of the same text, the remembered suggestions above decide what is near enough
+      const rebasedLanded = landed === undefined || landed.path !== path || (landed.text === text && landed.offset !== offset)
         ? undefined
-        : rebaseSuggestions(landed.suggestions, path, landed.text, text, landed.offset);
+        : rebaseSuggestions(landed.suggestions, path, landed.text, text, { askedAt: landed.offset, cursor: offset });
       const carriedLate = rebasedLanded?.isAgreed === true ? withoutSecrets(rebasedLanded.suggestions) : [];
 
       if (carriedLate.length > 0) {
@@ -166,10 +172,11 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
         if (!isCurrent()) return;
 
         if (items.length > 0) {
-          runtime.lastServed = { path, text, suggestions: carriedLate };
+          runtime.lastServed = { kind: "completion", path, text, offset, suggestions: carriedLate };
           runtime.lastPending = undefined;
           logInfo(runtime.output, `${config.name}: carried ${items.length} suggestion(s) from an answer to an earlier text`);
           finishAsk(runtime.timing, clock, "carried");
+          refreshStatus(runtime);
 
           return items;
         }
@@ -197,10 +204,10 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
         if (!isCurrent() || items.length === 0) return undefined;
 
-        runtime.lastServed = { path, text, suggestions: [fix.edit] };
+        runtime.lastServed = { kind: "edit", path, text, suggestions: [fix.edit] };
         logInfo(runtime.output, `${config.name}: offered the language server's quick fix "${fix.title}"`);
-        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "quick fix" }, statusMarks(runtime));
         finishAsk(runtime.timing, clock, "quickfix");
+        setStatus(runtime, { kind: "idle", name: config.name, detail: "quick fix" });
 
         return items;
       };
@@ -235,7 +242,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       if (!isCurrent()) return;
 
       if (!key.ok) {
-        renderStatus(runtime.status, { kind: "problem", name: config.name, detail: key.problem }, statusMarks(runtime));
+        setStatus(runtime, { kind: "problem", name: config.name, detail: key.problem });
 
         return;
       }
@@ -245,12 +252,12 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       if (!isCurrent()) return;
 
       if (!headers.ok) {
-        renderStatus(runtime.status, { kind: "problem", name: config.name, detail: headers.problem }, statusMarks(runtime));
+        setStatus(runtime, { kind: "problem", name: config.name, detail: headers.problem });
 
         return;
       }
 
-      renderStatus(runtime.status, { kind: "working", name: config.name }, statusMarks(runtime));
+      setStatus(runtime, { kind: "working", name: config.name });
 
       const reported = runtime.diagnostics.adjust(document, diagnosticsFor(document.uri, position.line));
       const diagnostics = withFixTitles(withoutUnfinished(reported, typing), fixes);
@@ -294,7 +301,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
       const carried = previous === undefined || previous.path !== path
         ? undefined
-        : await carriedFrom(previous, running, path, snapshotText);
+        : await carriedFrom(previous, running, path, snapshotText, offset);
 
       if (!isCurrent()) {
         finishAsk(runtime.timing, clock, "obsolete");
@@ -313,12 +320,12 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
         if (runtime.inFlight?.result === running) runtime.inFlight = undefined;
 
-        runtime.lastServed = { path, text: snapshotText, suggestions: late };
+        runtime.lastServed = { kind: "completion", path, text: snapshotText, offset, suggestions: late };
         runtime.lastPending = undefined;
 
         logInfo(runtime.output, `${config.name}: carried ${items.length} suggestion(s) from the answer to the text before the last keystroke`);
         finishAsk(runtime.timing, clock, "carried");
-        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: `${items.length} suggestion(s)` }, statusMarks(runtime));
+        setStatus(runtime, { kind: "idle", name: config.name, detail: `${items.length} suggestion(s)` });
 
         return items;
       }
@@ -343,7 +350,9 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
         if (!isCurrent()) return;
 
         if (items.length > 0) {
-          const served = { path, text, offset, suggestions: partial };
+          runtime.lastServed = { kind: "completion", path, text, offset, suggestions: partial };
+
+          const served = runtime.lastServed;
           const upgrade = async (): Promise<void> => {
             const result = await running;
 
@@ -353,15 +362,15 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
             clock.steps.response = ask.exchanges.reduce((sum, held) => sum + held.ms, 0);
             finishAsk(runtime.timing, clock, ask.outcome());
+            refreshStatus(runtime);
             speculateFrom(whole[0]);
 
             if (JSON.stringify(whole) === JSON.stringify(partial)) return;
 
-            runtime.lastServed = { path, text, offset, suggestions: whole };
+            runtime.lastServed = { kind: "completion", path, text, offset, suggestions: whole };
             await vscode.commands.executeCommand("editor.action.inlineSuggest.trigger");
           };
 
-          runtime.lastServed = served;
           clock.steps.partial = Date.now() - clock.startedAt;
           logInfo(runtime.output, `${config.name}: showed the first final part of the reply after ${clock.steps.partial} ms`);
           void upgrade();
@@ -391,7 +400,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
         logError(runtime.output, `${config.name}: ${detail}`);
 
-        renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, statusMarks(runtime));
+        setStatus(runtime, { kind: "problem", name: config.name, detail });
 
         return;
       }
@@ -400,7 +409,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
         const detail = `template names ${result.unknown.join(", ")}, which tablet cannot fill`;
 
         logError(runtime.output, `${config.name}: ${detail}`);
-        renderStatus(runtime.status, { kind: "problem", name: config.name, detail }, statusMarks(runtime));
+        setStatus(runtime, { kind: "problem", name: config.name, detail });
 
         return;
       }
@@ -413,15 +422,15 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
         if (!isCurrent()) return;
 
         if (fallback !== undefined) {
-          runtime.lastServed = { path: snapshot.path, text: snapshotText, suggestions: [{ kind: "format", path: snapshot.path }] };
+          runtime.lastServed = { kind: "edit", path: snapshot.path, text: snapshotText, suggestions: [{ kind: "format", path: snapshot.path }] };
           logInfo(runtime.output, `${config.name}: ${result.reason}, offering the formatter for a flagged line instead`);
-          renderStatus(runtime.status, { kind: "idle", name: config.name, detail: "offered the formatter" }, statusMarks(runtime));
+          setStatus(runtime, { kind: "idle", name: config.name, detail: "offered the formatter" });
 
           return [fallback];
         }
 
         logInfo(runtime.output, `${config.name}: no suggestion, ${result.reason}`);
-        renderStatus(runtime.status, { kind: "idle", name: config.name, detail: result.reason }, statusMarks(runtime));
+        setStatus(runtime, { kind: "idle", name: config.name, detail: result.reason });
 
         return;
       }
@@ -434,7 +443,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
 
       clock.steps.render = Date.now() - renderedFrom;
 
-      runtime.lastServed = { path: snapshot.path, text: snapshotText, offset, suggestions: safe };
+      runtime.lastServed = { kind: "completion", path: snapshot.path, text: snapshotText, offset, suggestions: safe };
 
       if (items.length > 0) speculateFrom(safe[0]);
 
@@ -447,7 +456,7 @@ export const createProvider = (runtime: Runtime): vscode.InlineCompletionItemPro
       if (items.length > 0) finishAsk(runtime.timing, clock, ask.outcome());
 
       for (const item of items) logInfo(runtime.output, `  handed to the editor: ${describeItem(item)}`);
-      renderStatus(runtime.status, { kind: "idle", name: config.name, detail }, statusMarks(runtime));
+      setStatus(runtime, { kind: "idle", name: config.name, detail });
 
       if (items.length > 0 && isCollectEnabled()) {
         holdRecord(runtime, items, document, snapshot, config.format === "fim" ? undefined : config.windowLines, {

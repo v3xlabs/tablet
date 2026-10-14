@@ -154,7 +154,7 @@
           "type": "boolean",
           "default": false,
           "scope": "resource",
-          "markdownDescription": "Record every suggestion tablet serves, what the model was sent, and what you did next, as JSON lines under the extension's global storage. Nothing leaves the machine. Secrets are redacted and files that look like secrets are never recorded. Toggle it from the status bar menu, which writes this setting for the open workspace."
+          "markdownDescription": "Record every suggestion tablet serves, what the model was sent, and what you did next, as JSON lines under the extension's global storage. Nothing leaves the machine. Secrets are redacted and files that look like secrets are never recorded. Toggle it from the status bar hover or menu, which write this setting for the open workspace."
         },
         "tablet.activeConfiguration": {
           "type": "string",

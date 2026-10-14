@@ -5,7 +5,6 @@ import { complete, type CompletionRequest, type CompletionResult } from "../src/
 import { formatFallback, itemsFor } from "../src/format/inline-items";
 import { createProvider } from "../src/provider";
 import { createRuntime } from "../src/runtime";
-import { deferred } from "./deferred";
 
 const state = vi.hoisted(() => ({
   settings: {} as Record<string, unknown>,
@@ -25,6 +24,7 @@ vi.mock("vscode", () => ({
   window: {
     createOutputChannel: () => ({ appendLine: vi.fn() }),
     createStatusBarItem: () => ({ show: vi.fn() }),
+    activeColorTheme: { kind: 2 },
   },
   commands: { executeCommand: state.executeCommand },
   languages: { getDiagnostics: () => state.diagnostics },
@@ -33,6 +33,8 @@ vi.mock("vscode", () => ({
   ExtensionMode: { Development: 1 },
   InlineCompletionTriggerKind: { Automatic: 0, Invoke: 1 },
   ThemeColor: class {},
+  ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
+  MarkdownString: class {},
 }));
 vi.mock("../src/lsp", () => ({ createDefinitionCache: () => ({ read: vi.fn(() => []), invalidate: vi.fn(), dispose: vi.fn() }) }));
 vi.mock("../src/endpoint", async importOriginal => ({ ...await importOriginal<typeof import("../src/endpoint")>(), complete: vi.fn() }));
@@ -143,12 +145,12 @@ describe("typing bursts", () => {
   ])("carry the dispatched reply when it is %s, through asks cancelled while debouncing", async (_state, isLanded) => {
     nextEdit();
     const { invoke, edit, runtime } = setup({ text: "const value = \n" });
-    const oldReply = deferred<CompletionResult>();
+    const oldReply = Promise.withResolvers<CompletionResult>();
     const first = tokenSource();
     const second = tokenSource();
 
     vi.mocked(complete).mockReturnValueOnce(oldReply.promise)
-      .mockReturnValueOnce(deferred<CompletionResult>().promise);
+      .mockReturnValueOnce(Promise.withResolvers<CompletionResult>().promise);
     const old = invoke({ source: first });
 
     await flush();
@@ -183,8 +185,8 @@ describe("stale replies", () => {
     ["the text changed", (_source: ReturnType<typeof tokenSource>, edit: (text: string) => void) => edit("const value = x")],
   ])("are never shown, in part or whole, once %s", async (_reason, supersede) => {
     const { invoke, edit, runtime } = setup();
-    const firstPart = deferred<undefined>();
-    const rest = deferred<CompletionResult>();
+    const firstPart = Promise.withResolvers<undefined>();
+    const rest = Promise.withResolvers<CompletionResult>();
     const source = tokenSource();
 
     vi.mocked(complete).mockImplementationOnce(streaming(firstPart.promise, rest.promise));
@@ -207,7 +209,7 @@ describe("progressive display", () => {
     ["keeps the screen as it is when the text changed meanwhile", true],
   ])("shows the first finished line at once, then %s", async (_outcome, isEdited) => {
     const { invoke, edit, runtime } = setup();
-    const rest = deferred<CompletionResult>();
+    const rest = Promise.withResolvers<CompletionResult>();
 
     vi.mocked(complete).mockImplementationOnce(streaming(Promise.resolve(), rest.promise));
     expect(await invoke()).toEqual([item]);
@@ -303,5 +305,27 @@ describe("word continuation", () => {
 
     expect(await invoke()).toEqual([item]);
     expect(runtime.lastServed?.suggestions).toEqual([{ kind: "completion", text: continuation }]);
+  });
+});
+
+describe("undoing the typing", () => {
+  it("serves the remembered completion at once, with no model call and no debounce", async () => {
+    configure("zeta");
+    vi.mocked(complete).mockImplementation(async request => ({ ok: true, texts: [request.maxTokens < 100 ? "ble = 1;" : "<|marker_1|><|marker_1|>"] }));
+    const { invoke, edit, runtime } = setup({ text: TYPED, line: 2, path: "src/timing.ts" });
+
+    expect(await invoke()).toEqual([item]);
+    const asked = vi.mocked(complete).mock.calls.length;
+
+    vi.useFakeTimers();
+    edit(`${TYPED}x`);
+    const typing = invoke({ isAutomatic: true });
+
+    edit(TYPED);
+    expect(await invoke({ isAutomatic: true })).toEqual([item]);
+    expect(complete).toHaveBeenCalledTimes(asked);
+    expect(runtime.lastServed?.suggestions).toEqual([{ kind: "completion", text: "ble = 1;" }]);
+    await vi.runAllTimersAsync();
+    await typing;
   });
 });

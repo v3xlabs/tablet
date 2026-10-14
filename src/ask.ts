@@ -60,17 +60,12 @@ export const createAsk = (context: AskContext): Ask => {
   const exchanges: Exchange[] = [];
   let isJoined = false;
   let hasPartial = false;
-  let resolvePartial: ((suggestions: Suggestion[]) => void) | undefined;
-  // ES2023 target: Promise.withResolvers is not available.
-  // eslint-disable-next-line unicorn/prefer-promise-with-resolvers
-  const partial = new Promise<Suggestion[]>((resolve) => {
-    resolvePartial = resolve;
-  });
+  const { promise: partial, resolve: resolvePartial } = Promise.withResolvers<Suggestion[]>();
   const notePartial = (suggestions: Suggestion[]): void => {
     if (hasPartial) return;
 
     hasPartial = true;
-    resolvePartial?.(suggestions);
+    resolvePartial(suggestions);
   };
 
   // Once a part is shown, read the stream to its end unless this ask may stop early.

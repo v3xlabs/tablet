@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as vscode from "vscode";
 
 import { createDefinitionCache, type DefinitionCache } from "../src/lsp";
-import { deferred } from "./deferred";
 
 const mocks = vi.hoisted(() => ({ executeCommand: vi.fn(), openTextDocument: vi.fn() }));
 
@@ -76,7 +75,7 @@ describe("definition cache", () => {
   it("keeps the excerpts of the cursor line through edits on other lines and in other files", async () => {
     const cache = cacheOf();
     const source = editable("source.ts", "computeTotal()\n\nconst other = 1");
-    const lookup = deferred<vscode.Location[]>();
+    const lookup = Promise.withResolvers<vscode.Location[]>();
 
     mocks.executeCommand.mockReturnValueOnce(lookup.promise);
     cache.read(source.document, at(0));
@@ -108,7 +107,7 @@ describe("definition cache", () => {
   it("never answers a line with a lookup still running for an identical line elsewhere", async () => {
     const cache = cacheOf();
     const source = editable("source.ts", ["helper(x)", "", "", "helper(x)"].join("\n"));
-    const lookup = deferred<vscode.Location[]>();
+    const lookup = Promise.withResolvers<vscode.Location[]>();
 
     mocks.executeCommand.mockReturnValueOnce(lookup.promise);
     cache.read(source.document, at(0));

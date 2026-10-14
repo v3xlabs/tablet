@@ -4,6 +4,8 @@ export type Eagerness = "low" | "medium" | "high";
 
 export type EagernessSetting = Eagerness | "auto";
 
+export const EAGERNESS_SETTINGS: EagernessSetting[] = ["auto", "low", "medium", "high"];
+
 const RECENT = 20;
 const HIGH_FROM = 0.7;
 const MEDIUM_FROM = 0.4;

@@ -74,18 +74,25 @@ export type Carried = {
   isAgreed: boolean;
 };
 
+/** Where completions were asked, as an offset into the earlier text, and where the cursor is in the later text. */
+type Anchor = { askedAt: number; cursor: number; };
+
 /**
  * Carries suggestions made for one text of a file over to a later text of the same file.
  * An edit in another file is untouched by typing here and stays as it was. A completion
- * is carried only when its start was typed at `anchor`, an offset into `before`. A
- * formatter offer is worked out again from the text it would format, so it is never carried.
+ * is carried only when its start was typed at the anchor, or when the text is unchanged
+ * and the cursor is back at the anchor. A formatter offer is worked out again from the
+ * text it would format, so it is never carried.
  */
-export const rebaseSuggestions = (suggestions: Suggestion[], path: string, before: string, after: string, anchor?: number): Carried => {
+export const rebaseSuggestions = (suggestions: Suggestion[], path: string, before: string, after: string, anchor?: Anchor): Carried => {
   const beforeText = before.replaceAll("\r\n", "\n");
   const afterText = after.replaceAll("\r\n", "\n");
 
-  // unchanged text (an undo, a cursor rest): its edits still hold, its completions do not
-  if (beforeText === afterText) return { suggestions: suggestions.filter(suggestion => suggestion.kind === "edit"), isAgreed: true };
+  if (beforeText === afterText) {
+    const isAtAnchor = anchor !== undefined && anchor.cursor === anchor.askedAt;
+
+    return { suggestions: suggestions.filter(suggestion => suggestion.kind === "edit" || (isAtAnchor && suggestion.kind === "completion")), isAgreed: true };
+  }
 
   const user = changeBetween(beforeText, afterText);
   const beforeStarts = lineStarts(beforeText);
@@ -95,7 +102,7 @@ export const rebaseSuggestions = (suggestions: Suggestion[], path: string, befor
 
   for (const suggestion of suggestions) {
     if (suggestion.kind === "completion") {
-      const isTypedAtAnchor = user.start === anchor && user.end === anchor && user.text !== "";
+      const isTypedAtAnchor = user.start === anchor?.askedAt && user.end === anchor.askedAt && user.text !== "";
 
       if (isTypedAtAnchor && suggestion.text.startsWith(user.text) && suggestion.text !== user.text) {
         rebased.push({ kind: "completion", text: suggestion.text.slice(user.text.length) });
@@ -158,12 +165,13 @@ export const carriedFrom = async (
   running: Promise<SuggestResult>,
   path: string,
   text: string,
+  cursor: number,
 ): Promise<Suggestion[] | undefined> => {
   const first = await Promise.race([settled(true, previous.result), settled(false, running)]);
 
   if (!first.isPrevious || first.result.kind !== "suggestions") return undefined;
 
-  const carried = rebaseSuggestions(first.result.suggestions, path, previous.text, text, previous.offset);
+  const carried = rebaseSuggestions(first.result.suggestions, path, previous.text, text, { askedAt: previous.offset, cursor });
 
   return carried.isAgreed && carried.suggestions.length > 0 ? carried.suggestions : undefined;
 };

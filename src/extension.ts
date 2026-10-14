@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
 
 import { emptyCache } from "./cache";
+import { countRecords } from "./collect/store";
 import { registerCommands } from "./commands";
 import { isLanguageEnabled, isProseLanguage } from "./config";
 import { trackChange } from "./context/recent-edits";
 import { createProvider } from "./provider";
-import { cancelIdleTrigger, cancelRequests, createRuntime, isAutomaticEnabled, isSnoozed, noteFile, relativePath, type Runtime, scheduleIdleTrigger, showActive } from "./runtime";
+import { cancelIdleTrigger, cancelRequests, createRuntime, isAutomaticEnabled, isSnoozed, noteFile, refreshStatus, relativePath, type Runtime, scheduleIdleTrigger, showActive } from "./runtime";
 import type { Suggestion } from "./suggest";
 
 const DIAGNOSTIC_REACH = 10;
@@ -38,6 +39,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
   const runtime = createRuntime(context);
 
   showActive(runtime);
+  void countRecords(runtime.globalStoragePath).then((count) => {
+    runtime.recordCount = count;
+    refreshStatus(runtime);
+  });
 
   for (const document of vscode.workspace.textDocuments) trackDocument(runtime, document);
 
@@ -52,6 +57,8 @@ export const activate = (context: vscode.ExtensionContext): void => {
       createProvider(runtime),
       { displayName: "tablet" },
     ),
+    // the hover chart is an image drawn in fixed colors chosen for the theme kind
+    vscode.window.onDidChangeActiveColorTheme(() => refreshStatus(runtime)),
     vscode.workspace.onDidChangeTextDocument((event) => {
       // Virtual documents such as output channels change as tablet logs and hold no definitions.
       if (event.document.uri.scheme !== "file") return;
