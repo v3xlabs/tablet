@@ -4,7 +4,7 @@
   nodejs_22,
   pnpmConfigHook,
   fetchPnpmDeps,
-  pnpm,
+  pnpm_11,
   vsce,
   vscode-utils,
 }: let
@@ -35,13 +35,14 @@
 
     nativeBuildInputs = [
       nodejs_22
-      pnpm
+      pnpm_11
       pnpmConfigHook
       vsce
     ];
 
     pnpmDeps = fetchPnpmDeps {
       inherit (final) pname version src;
+      pnpm = pnpm_11;
       fetcherVersion = 4;
       hash = "sha256-wZOwkV5FUt0NRBwlJF1ak8/MWTqFXyvu9B8QQcdXdH8=";
     };
